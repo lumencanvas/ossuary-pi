@@ -1,0 +1,828 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Ossuary Pi Control Panel</title>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen, Ubuntu, sans-serif;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            min-height: 100vh;
+            padding: 20px;
+        }
+
+        .container {
+            max-width: 1200px;
+            margin: 0 auto;
+        }
+
+        .header {
+            text-align: center;
+            margin-bottom: 30px;
+        }
+
+        .header h1 {
+            color: white;
+            font-size: 2.5rem;
+            font-weight: 300;
+            text-shadow: 0 2px 4px rgba(0,0,0,0.1);
+        }
+
+        .status-bar {
+            background: white;
+            border-radius: 12px;
+            padding: 20px;
+            margin-bottom: 20px;
+            box-shadow: 0 10px 30px rgba(0,0,0,0.1);
+        }
+
+        .status-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+            gap: 20px;
+        }
+
+        .status-item {
+            display: flex;
+            align-items: center;
+            gap: 10px;
+        }
+
+        .status-indicator {
+            width: 12px;
+            height: 12px;
+            border-radius: 50%;
+            flex-shrink: 0;
+        }
+
+        .status-indicator.active {
+            background: #10b981;
+            box-shadow: 0 0 10px rgba(16, 185, 129, 0.5);
+        }
+
+        .status-indicator.inactive {
+            background: #ef4444;
+        }
+
+        .status-indicator.pending {
+            background: #f59e0b;
+            animation: pulse 2s infinite;
+        }
+
+        @keyframes pulse {
+            0% { opacity: 1; }
+            50% { opacity: 0.5; }
+            100% { opacity: 1; }
+        }
+
+        .card {
+            background: white;
+            border-radius: 12px;
+            padding: 25px;
+            margin-bottom: 20px;
+            box-shadow: 0 10px 30px rgba(0,0,0,0.1);
+        }
+
+        .card-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 20px;
+            padding-bottom: 15px;
+            border-bottom: 1px solid #e5e7eb;
+        }
+
+        .card-title {
+            font-size: 1.25rem;
+            font-weight: 600;
+            color: #1f2937;
+        }
+
+        .service-controls {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
+            gap: 10px;
+            margin-bottom: 20px;
+        }
+
+        .btn {
+            padding: 10px 20px;
+            border: none;
+            border-radius: 8px;
+            font-size: 14px;
+            font-weight: 500;
+            cursor: pointer;
+            transition: all 0.3s ease;
+            text-transform: uppercase;
+            letter-spacing: 0.5px;
+        }
+
+        .btn:hover {
+            transform: translateY(-2px);
+            box-shadow: 0 5px 15px rgba(0,0,0,0.2);
+        }
+
+        .btn:active {
+            transform: translateY(0);
+        }
+
+        .btn-primary {
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            color: white;
+        }
+
+        .btn-success {
+            background: linear-gradient(135deg, #10b981 0%, #059669 100%);
+            color: white;
+        }
+
+        .btn-danger {
+            background: linear-gradient(135deg, #ef4444 0%, #dc2626 100%);
+            color: white;
+        }
+
+        .btn-warning {
+            background: linear-gradient(135deg, #f59e0b 0%, #d97706 100%);
+            color: white;
+        }
+
+        .btn-secondary {
+            background: linear-gradient(135deg, #6b7280 0%, #4b5563 100%);
+            color: white;
+        }
+
+        .btn:disabled {
+            opacity: 0.5;
+            cursor: not-allowed;
+            transform: none !important;
+        }
+
+        .command-section {
+            margin-bottom: 20px;
+        }
+
+        .command-input-group {
+            display: flex;
+            gap: 10px;
+            margin-bottom: 15px;
+        }
+
+        .command-input {
+            flex: 1;
+            padding: 12px 15px;
+            border: 2px solid #e5e7eb;
+            border-radius: 8px;
+            font-size: 14px;
+            font-family: 'Monaco', 'Menlo', monospace;
+            transition: border-color 0.3s;
+        }
+
+        .command-input:focus {
+            outline: none;
+            border-color: #667eea;
+        }
+
+        .log-viewer {
+            background: #1f2937;
+            color: #10b981;
+            padding: 15px;
+            border-radius: 8px;
+            font-family: 'Monaco', 'Menlo', monospace;
+            font-size: 12px;
+            line-height: 1.5;
+            height: 300px;
+            overflow-y: auto;
+            white-space: pre-wrap;
+            word-wrap: break-word;
+        }
+
+        .log-viewer::-webkit-scrollbar {
+            width: 8px;
+        }
+
+        .log-viewer::-webkit-scrollbar-track {
+            background: #374151;
+            border-radius: 4px;
+        }
+
+        .log-viewer::-webkit-scrollbar-thumb {
+            background: #6b7280;
+            border-radius: 4px;
+        }
+
+        .tabs {
+            display: flex;
+            gap: 10px;
+            margin-bottom: 20px;
+            border-bottom: 2px solid #e5e7eb;
+        }
+
+        .tab {
+            padding: 10px 20px;
+            background: none;
+            border: none;
+            color: #6b7280;
+            cursor: pointer;
+            font-weight: 500;
+            transition: all 0.3s;
+            border-bottom: 2px solid transparent;
+            margin-bottom: -2px;
+        }
+
+        .tab:hover {
+            color: #667eea;
+        }
+
+        .tab.active {
+            color: #667eea;
+            border-bottom-color: #667eea;
+        }
+
+        .tab-content {
+            display: none;
+        }
+
+        .tab-content.active {
+            display: block;
+        }
+
+        .alert {
+            padding: 12px 15px;
+            border-radius: 8px;
+            margin-bottom: 15px;
+            display: flex;
+            align-items: center;
+            gap: 10px;
+        }
+
+        .alert-success {
+            background: #d1fae5;
+            color: #065f46;
+            border-left: 4px solid #10b981;
+        }
+
+        .alert-error {
+            background: #fee2e2;
+            color: #991b1b;
+            border-left: 4px solid #ef4444;
+        }
+
+        .alert-warning {
+            background: #fef3c7;
+            color: #92400e;
+            border-left: 4px solid #f59e0b;
+        }
+
+        .alert-info {
+            background: #dbeafe;
+            color: #1e40af;
+            border-left: 4px solid #3b82f6;
+        }
+
+        .spinner {
+            width: 20px;
+            height: 20px;
+            border: 2px solid #e5e7eb;
+            border-top-color: #667eea;
+            border-radius: 50%;
+            animation: spin 1s linear infinite;
+        }
+
+        @keyframes spin {
+            to { transform: rotate(360deg); }
+        }
+
+        .hidden {
+            display: none !important;
+        }
+
+        .service-row {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            padding: 15px;
+            background: #f9fafb;
+            border-radius: 8px;
+            margin-bottom: 10px;
+        }
+
+        .service-info {
+            display: flex;
+            align-items: center;
+            gap: 15px;
+        }
+
+        .service-name {
+            font-weight: 600;
+            color: #1f2937;
+        }
+
+        .service-status {
+            padding: 4px 10px;
+            border-radius: 12px;
+            font-size: 12px;
+            font-weight: 500;
+        }
+
+        .service-status.active {
+            background: #d1fae5;
+            color: #065f46;
+        }
+
+        .service-status.inactive {
+            background: #fee2e2;
+            color: #991b1b;
+        }
+
+        .service-actions {
+            display: flex;
+            gap: 8px;
+        }
+
+        .btn-small {
+            padding: 6px 12px;
+            font-size: 12px;
+        }
+
+        @media (max-width: 768px) {
+            .header h1 {
+                font-size: 1.75rem;
+            }
+
+            .service-controls {
+                grid-template-columns: 1fr;
+            }
+
+            .command-input-group {
+                flex-direction: column;
+            }
+
+            .service-row {
+                flex-direction: column;
+                gap: 10px;
+            }
+
+            .service-actions {
+                width: 100%;
+            }
+
+            .btn-small {
+                flex: 1;
+            }
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <div class="header">
+            <h1>Ossuary Pi Control Panel</h1>
+        </div>
+
+        <div class="status-bar">
+            <div class="status-grid">
+                <div class="status-item">
+                    <div class="status-indicator" id="wifi-status"></div>
+                    <span>WiFi: <strong id="wifi-text">Checking...</strong></span>
+                </div>
+                <div class="status-item">
+                    <div class="status-indicator" id="captive-status"></div>
+                    <span>Captive Portal: <strong id="captive-text">Checking...</strong></span>
+                </div>
+                <div class="status-item">
+                    <div class="status-indicator" id="process-status"></div>
+                    <span>Process Manager: <strong id="process-text">Checking...</strong></span>
+                </div>
+                <div class="status-item">
+                    <div class="status-indicator" id="config-status"></div>
+                    <span>Config Server: <strong id="config-text">Active</strong></span>
+                </div>
+            </div>
+        </div>
+
+        <div id="alerts"></div>
+
+        <div class="card">
+            <div class="card-header">
+                <h2 class="card-title">Services</h2>
+                <button class="btn btn-primary btn-small" onclick="refreshServices()">Refresh</button>
+            </div>
+            <div id="services-list">
+                <div class="service-row">
+                    <div class="service-info">
+                        <span class="service-name">WiFi Connect</span>
+                        <span class="service-status" id="wifi-connect-status">Checking...</span>
+                    </div>
+                    <div class="service-actions">
+                        <button class="btn btn-success btn-small" onclick="controlService('wifi-connect', 'start')">Start</button>
+                        <button class="btn btn-danger btn-small" onclick="controlService('wifi-connect', 'stop')">Stop</button>
+                        <button class="btn btn-warning btn-small" onclick="controlService('wifi-connect', 'restart')">Restart</button>
+                    </div>
+                </div>
+                <div class="service-row">
+                    <div class="service-info">
+                        <span class="service-name">Process Manager</span>
+                        <span class="service-status" id="ossuary-startup-status">Checking...</span>
+                    </div>
+                    <div class="service-actions">
+                        <button class="btn btn-success btn-small" onclick="controlService('ossuary-startup', 'start')">Start</button>
+                        <button class="btn btn-danger btn-small" onclick="controlService('ossuary-startup', 'stop')">Stop</button>
+                        <button class="btn btn-warning btn-small" onclick="controlService('ossuary-startup', 'restart')">Restart</button>
+                    </div>
+                </div>
+                <div class="service-row">
+                    <div class="service-info">
+                        <span class="service-name">Config Server</span>
+                        <span class="service-status active" id="ossuary-web-status">Active</span>
+                    </div>
+                    <div class="service-actions">
+                        <button class="btn btn-warning btn-small" onclick="controlService('ossuary-web', 'restart')">Restart</button>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <div class="card">
+            <div class="card-header">
+                <h2 class="card-title">Startup Command</h2>
+            </div>
+            <div class="command-section">
+                <div class="command-input-group">
+                    <input type="text" class="command-input" id="startup-command" placeholder="Enter command to run at startup (e.g., python3 /home/pi/my_script.py)">
+                    <button class="btn btn-primary" onclick="saveCommand()">Save</button>
+                    <button class="btn btn-success" onclick="testCommand()">Test</button>
+                </div>
+                <div class="service-controls">
+                    <button class="btn btn-secondary" onclick="loadCurrentCommand()">Load Current</button>
+                    <button class="btn btn-danger" onclick="clearCommand()">Clear</button>
+                </div>
+            </div>
+        </div>
+
+        <div class="card">
+            <div class="card-header">
+                <h2 class="card-title">Logs</h2>
+            </div>
+            <div class="tabs">
+                <button class="tab active" onclick="switchTab('process', event)">Process Output</button>
+                <button class="tab" onclick="switchTab('wifi', event)">WiFi Connect</button>
+                <button class="tab" onclick="switchTab('system', event)">System</button>
+                <button class="tab" onclick="switchTab('test', event)">Test Output</button>
+            </div>
+            <div id="process-tab" class="tab-content active">
+                <div class="service-controls">
+                    <button class="btn btn-primary btn-small" onclick="refreshLog('process')">Refresh</button>
+                    <button class="btn btn-secondary btn-small" onclick="clearLog('process')">Clear View</button>
+                    <button class="btn btn-warning btn-small" onclick="toggleAutoRefresh('process')">Auto Refresh: <span id="auto-process">OFF</span></button>
+                </div>
+                <div class="log-viewer" id="process-log">Loading process logs...</div>
+            </div>
+            <div id="wifi-tab" class="tab-content">
+                <div class="service-controls">
+                    <button class="btn btn-primary btn-small" onclick="refreshLog('wifi')">Refresh</button>
+                    <button class="btn btn-secondary btn-small" onclick="clearLog('wifi')">Clear View</button>
+                </div>
+                <div class="log-viewer" id="wifi-log">Loading WiFi Connect logs...</div>
+            </div>
+            <div id="system-tab" class="tab-content">
+                <div class="service-controls">
+                    <button class="btn btn-primary btn-small" onclick="refreshLog('system')">Refresh</button>
+                    <button class="btn btn-secondary btn-small" onclick="clearLog('system')">Clear View</button>
+                </div>
+                <div class="log-viewer" id="system-log">Loading system logs...</div>
+            </div>
+            <div id="test-tab" class="tab-content">
+                <div class="service-controls">
+                    <button class="btn btn-danger btn-small" onclick="stopTest()">Stop Test</button>
+                    <button class="btn btn-secondary btn-small" onclick="clearLog('test')">Clear View</button>
+                </div>
+                <div class="log-viewer" id="test-log">Test output will appear here when you test a command...</div>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        let autoRefreshIntervals = {};
+        let testProcess = null;
+
+        // Initialize on page load
+        document.addEventListener('DOMContentLoaded', function() {
+            updateStatus();
+            loadCurrentCommand();
+            refreshServices();
+            refreshLog('process');
+            setInterval(updateStatus, 5000);
+        });
+
+        function showAlert(message, type = 'info') {
+            const alertDiv = document.createElement('div');
+            alertDiv.className = `alert alert-${type}`;
+            alertDiv.textContent = message;
+
+            const alertsContainer = document.getElementById('alerts');
+            alertsContainer.appendChild(alertDiv);
+
+            setTimeout(() => {
+                alertDiv.remove();
+            }, 5000);
+        }
+
+        async function updateStatus() {
+            try {
+                const response = await fetch('/api/status');
+                const data = await response.json();
+
+                // Update WiFi status
+                const wifiIndicator = document.getElementById('wifi-status');
+                const wifiText = document.getElementById('wifi-text');
+                if (data.wifi_connected) {
+                    wifiIndicator.className = 'status-indicator active';
+                    wifiText.textContent = data.ssid || 'Connected';
+                } else {
+                    wifiIndicator.className = 'status-indicator inactive';
+                    wifiText.textContent = 'Not Connected';
+                }
+
+                // Update captive portal status
+                const captiveIndicator = document.getElementById('captive-status');
+                const captiveText = document.getElementById('captive-text');
+                if (data.ap_mode) {
+                    captiveIndicator.className = 'status-indicator active';
+                    captiveText.textContent = 'Active';
+                } else {
+                    captiveIndicator.className = 'status-indicator inactive';
+                    captiveText.textContent = 'Inactive';
+                }
+
+                // Update config server status (always active if we can reach it)
+                const configIndicator = document.getElementById('config-status');
+                configIndicator.className = 'status-indicator active';
+
+            } catch (error) {
+                console.error('Failed to update status:', error);
+            }
+        }
+
+        async function refreshServices() {
+            try {
+                const response = await fetch('/api/services');
+                const data = await response.json();
+
+                // Update WiFi Connect status
+                const wifiStatus = document.getElementById('wifi-connect-status');
+                if (data['wifi-connect'] === 'active') {
+                    wifiStatus.className = 'service-status active';
+                    wifiStatus.textContent = 'Active';
+                } else {
+                    wifiStatus.className = 'service-status inactive';
+                    wifiStatus.textContent = 'Inactive';
+                }
+
+                // Update Process Manager status
+                const processStatus = document.getElementById('ossuary-startup-status');
+                const processIndicator = document.getElementById('process-status');
+                const processText = document.getElementById('process-text');
+                if (data['ossuary-startup'] === 'active') {
+                    processStatus.className = 'service-status active';
+                    processStatus.textContent = 'Active';
+                    processIndicator.className = 'status-indicator active';
+                    processText.textContent = 'Running';
+                } else {
+                    processStatus.className = 'service-status inactive';
+                    processStatus.textContent = 'Inactive';
+                    processIndicator.className = 'status-indicator inactive';
+                    processText.textContent = 'Stopped';
+                }
+
+            } catch (error) {
+                console.error('Failed to refresh services:', error);
+                showAlert('Failed to refresh service status', 'error');
+            }
+        }
+
+        async function controlService(service, action) {
+            try {
+                showAlert(`${action.charAt(0).toUpperCase() + action.slice(1)}ing ${service}...`, 'info');
+
+                const response = await fetch('/api/service-control', {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json'
+                    },
+                    body: JSON.stringify({
+                        service: service,
+                        action: action
+                    })
+                });
+
+                const data = await response.json();
+
+                if (data.success) {
+                    showAlert(`Successfully ${action}ed ${service}`, 'success');
+                    setTimeout(refreshServices, 1000);
+                } else {
+                    showAlert(`Failed to ${action} ${service}: ${data.error}`, 'error');
+                }
+            } catch (error) {
+                console.error('Service control error:', error);
+                showAlert(`Failed to ${action} ${service}`, 'error');
+            }
+        }
+
+        async function loadCurrentCommand() {
+            try {
+                const response = await fetch('/api/startup');
+                const data = await response.json();
+                document.getElementById('startup-command').value = data.command || '';
+            } catch (error) {
+                console.error('Failed to load command:', error);
+                showAlert('Failed to load current command', 'error');
+            }
+        }
+
+        async function saveCommand() {
+            const command = document.getElementById('startup-command').value;
+
+            try {
+                const response = await fetch('/api/startup', {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json'
+                    },
+                    body: JSON.stringify({ command: command })
+                });
+
+                const data = await response.json();
+
+                if (data.success) {
+                    showAlert('Command saved successfully', 'success');
+                    if (!data.service_active) {
+                        showAlert('Process manager is not running. Start the service to run your command.', 'warning');
+                    }
+                } else {
+                    showAlert('Failed to save command', 'error');
+                }
+            } catch (error) {
+                console.error('Failed to save command:', error);
+                showAlert('Failed to save command', 'error');
+            }
+        }
+
+        async function testCommand() {
+            const command = document.getElementById('startup-command').value;
+
+            if (!command) {
+                showAlert('Please enter a command to test', 'warning');
+                return;
+            }
+
+            // Switch to test tab
+            switchTab('test', { target: document.querySelectorAll('.tab')[3] });
+
+            const testLog = document.getElementById('test-log');
+            testLog.textContent = 'Starting test...\n';
+
+            try {
+                const response = await fetch('/api/test-command', {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json'
+                    },
+                    body: JSON.stringify({ command: command })
+                });
+
+                const data = await response.json();
+
+                if (data.pid) {
+                    testProcess = data.pid;
+                    showAlert('Test started. Output will appear below.', 'success');
+
+                    // Start polling for output
+                    pollTestOutput();
+                } else {
+                    testLog.textContent += '\nFailed to start test: ' + (data.error || 'Unknown error');
+                    showAlert('Failed to start test', 'error');
+                }
+            } catch (error) {
+                console.error('Failed to test command:', error);
+                testLog.textContent += '\nError: ' + error.message;
+                showAlert('Failed to test command', 'error');
+            }
+        }
+
+        async function pollTestOutput() {
+            if (!testProcess) return;
+
+            try {
+                const response = await fetch(`/api/test-output/${testProcess}`);
+                const data = await response.json();
+
+                const testLog = document.getElementById('test-log');
+                if (data.output) {
+                    testLog.textContent += data.output;
+                    testLog.scrollTop = testLog.scrollHeight;
+                }
+
+                if (data.running) {
+                    setTimeout(pollTestOutput, 1000);
+                } else {
+                    testLog.textContent += '\n\nTest completed with exit code: ' + data.exit_code;
+                    testProcess = null;
+                }
+            } catch (error) {
+                console.error('Failed to poll test output:', error);
+            }
+        }
+
+        async function stopTest() {
+            if (!testProcess) {
+                showAlert('No test is running', 'warning');
+                return;
+            }
+
+            try {
+                const response = await fetch(`/api/stop-test/${testProcess}`, {
+                    method: 'POST'
+                });
+
+                const data = await response.json();
+
+                if (data.success) {
+                    showAlert('Test stopped', 'success');
+                    document.getElementById('test-log').textContent += '\n\nTest stopped by user.';
+                    testProcess = null;
+                }
+            } catch (error) {
+                console.error('Failed to stop test:', error);
+                showAlert('Failed to stop test', 'error');
+            }
+        }
+
+        function clearCommand() {
+            document.getElementById('startup-command').value = '';
+        }
+
+        async function refreshLog(type) {
+            try {
+                const response = await fetch(`/api/logs/${type}`);
+                const data = await response.json();
+
+                const logViewer = document.getElementById(`${type}-log`);
+                logViewer.textContent = data.logs || 'No logs available';
+                logViewer.scrollTop = logViewer.scrollHeight;
+            } catch (error) {
+                console.error(`Failed to refresh ${type} logs:`, error);
+            }
+        }
+
+        function clearLog(type) {
+            document.getElementById(`${type}-log`).textContent = '';
+        }
+
+        function toggleAutoRefresh(type) {
+            const span = document.getElementById(`auto-${type}`);
+
+            if (autoRefreshIntervals[type]) {
+                clearInterval(autoRefreshIntervals[type]);
+                autoRefreshIntervals[type] = null;
+                span.textContent = 'OFF';
+            } else {
+                autoRefreshIntervals[type] = setInterval(() => refreshLog(type), 2000);
+                span.textContent = 'ON';
+                refreshLog(type);
+            }
+        }
+
+        function switchTab(tab, event) {
+            // Hide all tabs
+            document.querySelectorAll('.tab-content').forEach(el => {
+                el.classList.remove('active');
+            });
+
+            // Remove active class from all tab buttons
+            document.querySelectorAll('.tab').forEach(el => {
+                el.classList.remove('active');
+            });
+
+            // Show selected tab
+            document.getElementById(`${tab}-tab`).classList.add('active');
+
+            // Mark tab button as active
+            if (event && event.target) {
+                event.target.classList.add('active');
+            }
+
+            // Refresh the log for the selected tab
+            if (tab !== 'test') {
+                refreshLog(tab);
+            }
+        }
+    </script>
+</body>
+</html>
