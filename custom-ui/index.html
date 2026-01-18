@@ -4,198 +4,464 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Ossuary Setup</title>
+    <link href="https://fonts.googleapis.com/css2?family=Space+Mono:wght@400;700&family=Sora:wght@600;700&family=IBM+Plex+Mono:wght@400;500&display=swap" rel="stylesheet">
     <style>
+        /* ========================================
+           CSS RESET & ROOT VARIABLES
+           ======================================== */
         * {
             margin: 0;
             padding: 0;
             box-sizing: border-box;
         }
 
+        :root {
+            /* Paper & Ink (Light Mode) */
+            --paper: #f5f1eb;
+            --paper-warm: #faf6f0;
+            --paper-dark: #e8e4de;
+            --ink: #1a1a1a;
+            --ink-soft: #3a3a3a;
+            --ink-muted: #6a6a6a;
+
+            /* Primary Accent */
+            --teal: #0d9488;
+            --teal-dark: #0f766e;
+            --teal-light: #5eead4;
+            --teal-muted: rgba(13, 148, 136, 0.1);
+
+            /* Utilities */
+            --border: rgba(26, 26, 26, 0.15);
+            --success: #059669;
+            --success-bg: rgba(5, 150, 105, 0.1);
+            --error: #dc2626;
+            --error-bg: rgba(220, 38, 38, 0.1);
+
+            /* Spacing */
+            --space-xs: 4px;
+            --space-sm: 8px;
+            --space-md: 12px;
+            --space-lg: 16px;
+            --space-xl: 24px;
+            --space-2xl: 40px;
+        }
+
+        [data-theme="dark"] {
+            --paper: #1a1a1a;
+            --paper-warm: #222222;
+            --paper-dark: #2a2a2a;
+            --ink: #f5f1eb;
+            --ink-soft: #c5c5c5;
+            --ink-muted: #888888;
+            --teal: #14b8a6;
+            --teal-dark: #0d9488;
+            --teal-muted: rgba(20, 184, 166, 0.15);
+            --border: rgba(255, 255, 255, 0.12);
+        }
+
         body {
-            font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
-            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            font-family: 'IBM Plex Mono', monospace;
+            background: var(--paper);
+            color: var(--ink);
+            line-height: 1.6;
+            font-size: 14px;
             min-height: 100vh;
             display: flex;
             justify-content: center;
-            align-items: center;
-            padding: 20px;
+            align-items: flex-start;
+            padding: var(--space-xl);
         }
 
-        .container {
-            background: rgba(255, 255, 255, 0.95);
-            border-radius: 20px;
-            padding: 40px;
-            max-width: 500px;
+        /* Noise texture overlay */
+        body::after {
+            content: '';
+            position: fixed;
+            top: 0;
+            left: 0;
             width: 100%;
-            box-shadow: 0 20px 60px rgba(0, 0, 0, 0.3);
+            height: 100%;
+            background: url("data:image/svg+xml,%3Csvg viewBox='0 0 256 256' xmlns='http://www.w3.org/2000/svg'%3E%3Cfilter id='noise'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.8' numOctaves='4' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23noise)'/%3E%3C/svg%3E");
+            opacity: 0.025;
+            pointer-events: none;
+            z-index: 9999;
         }
 
-        h1 {
-            color: #333;
-            margin-bottom: 10px;
-            font-size: 28px;
+        /* ========================================
+           CONTAINER
+           ======================================== */
+        .container {
+            background: var(--paper-warm);
+            border: 1px solid var(--ink);
+            max-width: 480px;
+            width: 100%;
+            position: relative;
         }
 
-        .subtitle {
-            color: #666;
-            margin-bottom: 30px;
-            font-size: 14px;
+        /* Corner accents */
+        .container::before,
+        .container::after {
+            content: '';
+            position: absolute;
+            width: 12px;
+            height: 12px;
+            border: 1px solid var(--teal);
         }
 
+        .container::before {
+            top: -6px;
+            left: -6px;
+            border-right: none;
+            border-bottom: none;
+        }
+
+        .container::after {
+            bottom: -6px;
+            right: -6px;
+            border-left: none;
+            border-top: none;
+        }
+
+        /* ========================================
+           HEADER
+           ======================================== */
+        .header {
+            padding: var(--space-xl);
+            border-bottom: 1px solid var(--ink);
+        }
+
+        .header-label {
+            font-family: 'Space Mono', monospace;
+            font-size: 10px;
+            text-transform: uppercase;
+            letter-spacing: 2px;
+            color: var(--teal);
+            margin-bottom: var(--space-sm);
+            display: flex;
+            align-items: center;
+            gap: 10px;
+        }
+
+        .header-label::before {
+            content: '';
+            width: 20px;
+            height: 1px;
+            background: var(--teal);
+        }
+
+        .header h1 {
+            font-family: 'Sora', sans-serif;
+            font-size: 24px;
+            font-weight: 700;
+            letter-spacing: -0.5px;
+            color: var(--ink);
+            margin-bottom: var(--space-xs);
+        }
+
+        .header p {
+            font-size: 13px;
+            color: var(--ink-muted);
+        }
+
+        /* ========================================
+           TABS
+           ======================================== */
         .tab-container {
             display: flex;
-            gap: 10px;
-            margin-bottom: 30px;
-            border-bottom: 2px solid #e0e0e0;
+            border-bottom: 1px solid var(--ink);
         }
 
         .tab {
-            padding: 10px 20px;
-            background: none;
+            flex: 1;
+            padding: var(--space-md) var(--space-lg);
+            font-family: 'Space Mono', monospace;
+            font-size: 11px;
+            text-transform: uppercase;
+            letter-spacing: 0.5px;
+            background: var(--paper);
             border: none;
-            color: #666;
+            border-right: 1px solid var(--ink);
+            color: var(--ink-muted);
             cursor: pointer;
-            font-size: 16px;
-            transition: all 0.3s;
-            border-bottom: 3px solid transparent;
-            margin-bottom: -2px;
+            transition: all 0.15s;
+        }
+
+        .tab:last-child {
+            border-right: none;
+        }
+
+        .tab:hover {
+            background: var(--teal-muted);
+            color: var(--ink);
         }
 
         .tab.active {
-            color: #667eea;
-            border-bottom-color: #667eea;
+            background: var(--teal-muted);
+            color: var(--teal);
+            border-bottom: 2px solid var(--teal);
+            margin-bottom: -1px;
         }
 
         .tab-content {
             display: none;
+            padding: var(--space-xl);
         }
 
         .tab-content.active {
             display: block;
         }
 
-        .network-list {
-            max-height: 300px;
-            overflow-y: auto;
-            margin-bottom: 20px;
-        }
-
-        .network-item {
-            padding: 15px;
-            margin-bottom: 10px;
-            background: #f5f5f5;
-            border-radius: 10px;
-            cursor: pointer;
-            transition: all 0.3s;
-            display: flex;
-            justify-content: space-between;
-            align-items: center;
-        }
-
-        .network-item:hover {
-            background: #e8e8e8;
-            transform: translateX(5px);
-        }
-
-        .network-item.selected {
-            background: #667eea;
-            color: white;
-        }
-
-        .network-name {
-            font-weight: 500;
-        }
-
-        .signal-strength {
-            font-size: 12px;
-            opacity: 0.8;
-        }
-
-        .input-group {
-            margin-bottom: 20px;
-        }
-
-        label {
-            display: block;
-            margin-bottom: 8px;
-            color: #333;
-            font-weight: 500;
-        }
-
-        input, textarea {
-            width: 100%;
-            padding: 12px;
-            border: 2px solid #e0e0e0;
-            border-radius: 8px;
-            font-size: 14px;
-            transition: border-color 0.3s;
-        }
-
-        input:focus, textarea:focus {
-            outline: none;
-            border-color: #667eea;
-        }
-
-        textarea {
-            resize: vertical;
-            min-height: 100px;
-            font-family: 'Courier New', monospace;
-        }
-
-        button {
-            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
-            color: white;
-            border: none;
-            padding: 12px 30px;
-            border-radius: 8px;
-            font-size: 16px;
-            cursor: pointer;
-            transition: transform 0.3s, box-shadow 0.3s;
-            width: 100%;
-        }
-
-        button:hover {
-            transform: translateY(-2px);
-            box-shadow: 0 5px 20px rgba(102, 126, 234, 0.4);
-        }
-
-        button:disabled {
-            opacity: 0.5;
-            cursor: not-allowed;
-        }
-
+        /* ========================================
+           MESSAGES
+           ======================================== */
         .message {
-            padding: 15px;
-            border-radius: 8px;
-            margin-bottom: 20px;
+            padding: var(--space-md);
+            margin-bottom: var(--space-lg);
+            font-size: 12px;
             display: none;
+            border-left: 3px solid;
         }
 
         .message.success {
-            background: #d4edda;
-            color: #155724;
-            border: 1px solid #c3e6cb;
+            background: var(--success-bg);
+            color: var(--success);
+            border-color: var(--success);
         }
 
         .message.error {
-            background: #f8d7da;
-            color: #721c24;
-            border: 1px solid #f5c6cb;
+            background: var(--error-bg);
+            color: var(--error);
+            border-color: var(--error);
         }
 
         .message.show {
             display: block;
         }
 
+        /* ========================================
+           NETWORK LIST
+           ======================================== */
+        .section-label {
+            font-family: 'Space Mono', monospace;
+            font-size: 10px;
+            text-transform: uppercase;
+            letter-spacing: 1px;
+            color: var(--ink-muted);
+            margin-bottom: var(--space-sm);
+        }
+
+        .network-list {
+            max-height: 240px;
+            overflow-y: auto;
+            margin-bottom: var(--space-lg);
+            border: 1px solid var(--border);
+        }
+
+        .network-item {
+            padding: var(--space-md);
+            background: var(--paper);
+            border-bottom: 1px solid var(--border);
+            cursor: pointer;
+            transition: all 0.15s;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+        }
+
+        .network-item:last-child {
+            border-bottom: none;
+        }
+
+        .network-item:hover {
+            background: var(--teal-muted);
+        }
+
+        .network-item.selected {
+            background: var(--teal-muted);
+            border-left: 3px solid var(--teal);
+        }
+
+        .network-name {
+            font-family: 'Space Mono', monospace;
+            font-size: 12px;
+            font-weight: 700;
+            color: var(--ink);
+        }
+
+        .network-meta {
+            font-size: 10px;
+            color: var(--ink-muted);
+            margin-top: 2px;
+        }
+
+        .network-icon {
+            font-size: 14px;
+            opacity: 0.6;
+        }
+
+        /* ========================================
+           FORM ELEMENTS
+           ======================================== */
+        .input-group {
+            margin-bottom: var(--space-lg);
+        }
+
+        .input-group label {
+            display: block;
+            font-family: 'Space Mono', monospace;
+            font-size: 10px;
+            text-transform: uppercase;
+            letter-spacing: 1px;
+            color: var(--ink-muted);
+            margin-bottom: var(--space-sm);
+        }
+
+        input, textarea {
+            width: 100%;
+            padding: var(--space-md);
+            font-family: 'IBM Plex Mono', monospace;
+            font-size: 13px;
+            background: var(--paper);
+            border: 1px solid var(--border);
+            color: var(--ink);
+            transition: border-color 0.15s;
+        }
+
+        input:focus, textarea:focus {
+            outline: none;
+            border-color: var(--teal);
+        }
+
+        input::placeholder, textarea::placeholder {
+            color: var(--ink-muted);
+        }
+
+        textarea {
+            resize: vertical;
+            min-height: 100px;
+        }
+
+        /* Autofill detection and visual feedback */
+        input.has-value {
+            border-color: var(--teal);
+            background: var(--teal-muted);
+        }
+
+        input.valid {
+            border-color: var(--success);
+            background: var(--success-bg);
+        }
+
+        input.invalid {
+            border-color: var(--error);
+            background: var(--error-bg);
+        }
+
+        /* Webkit autofill detection */
+        @keyframes onAutoFillStart {
+            from { /* empty */ }
+            to { /* empty */ }
+        }
+
+        input:-webkit-autofill {
+            animation-name: onAutoFillStart;
+            animation-duration: 0.001s;
+        }
+
+        /* ========================================
+           BUTTONS
+           ======================================== */
+        .btn-primary {
+            font-family: 'Space Mono', monospace;
+            font-size: 11px;
+            text-transform: uppercase;
+            letter-spacing: 0.5px;
+            padding: var(--space-md) var(--space-lg);
+            background: var(--teal);
+            border: 1px solid var(--teal);
+            color: white;
+            cursor: pointer;
+            width: 100%;
+            transition: all 0.15s;
+        }
+
+        .btn-primary:hover {
+            background: var(--teal-dark);
+            border-color: var(--teal-dark);
+        }
+
+        .btn-primary:disabled {
+            opacity: 0.5;
+            cursor: not-allowed;
+        }
+
+        .btn-secondary {
+            font-family: 'Space Mono', monospace;
+            font-size: 11px;
+            text-transform: uppercase;
+            letter-spacing: 0.5px;
+            padding: var(--space-md) var(--space-lg);
+            background: transparent;
+            border: 1px solid var(--border);
+            color: var(--ink);
+            cursor: pointer;
+            width: 100%;
+            margin-top: var(--space-sm);
+            transition: all 0.15s;
+        }
+
+        .btn-secondary:hover {
+            border-color: var(--ink);
+        }
+
+        /* ========================================
+           INFO BOX
+           ======================================== */
+        .info-box {
+            background: var(--paper);
+            border-left: 3px solid var(--teal);
+            padding: var(--space-md);
+            margin-top: var(--space-lg);
+        }
+
+        .info-box h3 {
+            font-family: 'Space Mono', monospace;
+            font-size: 10px;
+            text-transform: uppercase;
+            letter-spacing: 1px;
+            color: var(--teal);
+            margin-bottom: var(--space-xs);
+        }
+
+        .info-box p {
+            font-size: 12px;
+            color: var(--ink-muted);
+            line-height: 1.5;
+        }
+
+        .info-box.success {
+            border-color: var(--success);
+            background: var(--success-bg);
+        }
+
+        .info-box.success h3 {
+            color: var(--success);
+        }
+
+        .info-box.success p {
+            color: var(--success);
+        }
+
+        /* ========================================
+           SPINNER
+           ======================================== */
         .spinner {
             display: none;
-            border: 3px solid #f3f3f3;
-            border-top: 3px solid #667eea;
-            border-radius: 50%;
-            width: 40px;
-            height: 40px;
-            animation: spin 1s linear infinite;
-            margin: 20px auto;
+            border: 2px solid var(--border);
+            border-top: 2px solid var(--teal);
+            width: 24px;
+            height: 24px;
+            animation: spin 0.8s linear infinite;
+            margin: var(--space-lg) auto;
         }
 
         .spinner.show {
@@ -207,41 +473,46 @@
             100% { transform: rotate(360deg); }
         }
 
-        .info-box {
-            background: #f0f4ff;
-            border-left: 4px solid #667eea;
-            padding: 15px;
-            margin-top: 20px;
-            border-radius: 5px;
-        }
-
-        .info-box h3 {
-            color: #667eea;
-            margin-bottom: 5px;
-            font-size: 14px;
-        }
-
-        .info-box p {
-            color: #666;
+        .empty-state {
+            text-align: center;
+            padding: var(--space-xl);
+            color: var(--ink-muted);
             font-size: 12px;
-            line-height: 1.5;
+        }
+
+        /* ========================================
+           RESPONSIVE
+           ======================================== */
+        @media (max-width: 500px) {
+            body {
+                padding: var(--space-md);
+                align-items: flex-start;
+            }
+
+            .container::before,
+            .container::after {
+                display: none;
+            }
         }
     </style>
 </head>
 <body>
     <div class="container">
-        <h1>Ossuary Configuration</h1>
-        <p class="subtitle">Configure WiFi and startup commands for your device</p>
-
-        <div class="tab-container">
-            <button class="tab active" onclick="switchTab('wifi')">WiFi Setup</button>
-            <button class="tab" onclick="switchTab('startup')">Startup Command</button>
+        <div class="header">
+            <div class="header-label">Device Setup</div>
+            <h1>Ossuary</h1>
+            <p>Configure WiFi and startup commands</p>
         </div>
 
-        <div id="message" class="message"></div>
+        <div class="tab-container">
+            <button class="tab active" onclick="switchTab('wifi')">WiFi</button>
+            <button class="tab" onclick="switchTab('startup')">Startup</button>
+        </div>
 
         <!-- WiFi Tab -->
         <div id="wifi-tab" class="tab-content active">
+            <div id="message" class="message"></div>
+
             <div class="input-group">
                 <label>Available Networks</label>
                 <div class="network-list" id="networks">
@@ -250,26 +521,26 @@
             </div>
 
             <div class="input-group">
-                <label for="manual-ssid">Or enter network name manually</label>
-                <input type="text" id="manual-ssid" placeholder="Network SSID (if not shown above)" onkeyup="onManualSSIDChange()">
+                <label for="manual-ssid">Manual Network Name</label>
+                <input type="text" id="manual-ssid" name="ssid"
+                       autocomplete="username" autocapitalize="none"
+                       autocorrect="off" spellcheck="false"
+                       placeholder="Enter SSID if not listed above">
             </div>
 
             <div class="input-group">
-                <label for="password">WiFi Password</label>
-                <input type="password" id="password" placeholder="Enter password (leave empty for open networks)">
+                <label for="password">Password</label>
+                <input type="password" id="password" name="password"
+                       autocomplete="current-password"
+                       placeholder="Leave empty for open networks">
             </div>
 
-            <button onclick="connectWiFi()" id="connect-btn">Connect to Network</button>
-            <button onclick="loadNetworks()" style="margin-top: 10px; background: #6b7280;">Refresh Networks</button>
+            <button class="btn-primary" onclick="connectWiFi()" id="connect-btn">Connect</button>
+            <button class="btn-secondary" onclick="loadNetworks()">Refresh Networks</button>
 
             <div class="info-box">
-                <h3>Connection Status</h3>
+                <h3>Status</h3>
                 <p id="status">Scanning for networks...</p>
-            </div>
-
-            <div class="info-box" style="margin-top: 10px;">
-                <h3>Troubleshooting</h3>
-                <p>If networks don't appear, enter your network name manually above. Hidden networks must be entered manually.</p>
             </div>
         </div>
 
@@ -277,14 +548,14 @@
         <div id="startup-tab" class="tab-content">
             <div class="input-group">
                 <label for="startup-cmd">Startup Command</label>
-                <textarea id="startup-cmd" placeholder="Example: python3 /home/pi/my_script.py"></textarea>
+                <textarea id="startup-cmd" placeholder="DISPLAY=:0 chromium --kiosk --noerrdialogs https://example.com/my-canvas"></textarea>
             </div>
 
-            <button onclick="saveStartupCommand()">Save Startup Command</button>
+            <button class="btn-primary" onclick="saveStartupCommand()">Save Command</button>
 
             <div class="info-box">
-                <h3>About Startup Commands</h3>
-                <p>This command will run automatically when your device boots and has network connectivity. Make sure to use full paths to executables and scripts.</p>
+                <h3>About</h3>
+                <p>This command runs automatically when your device boots with network connectivity. Use full paths to executables.</p>
             </div>
         </div>
     </div>
@@ -292,8 +563,204 @@
     <script>
         let selectedNetwork = null;
         let isConnecting = false;
+        let inputPollingInterval = null;
+        let lastInputValues = { ssid: '', password: '' };
 
-        // Tab switching
+        // Robust input value tracking for iOS Safari autofill
+        function setupInputTracking() {
+            const ssidInput = document.getElementById('manual-ssid');
+            const passwordInput = document.getElementById('password');
+
+            const events = ['input', 'change', 'keyup', 'paste', 'blur', 'focus'];
+
+            events.forEach(eventType => {
+                ssidInput.addEventListener(eventType, handleSSIDChange);
+                passwordInput.addEventListener(eventType, handlePasswordChange);
+            });
+
+            ssidInput.addEventListener('animationstart', handleAutofillAnimation);
+            passwordInput.addEventListener('animationstart', handleAutofillAnimation);
+
+            startInputPolling();
+        }
+
+        function handleAutofillAnimation(e) {
+            if (e.animationName === 'onAutoFillStart') {
+                setTimeout(() => syncInputValues(), 50);
+            }
+        }
+
+        function handleSSIDChange(e) {
+            updateSSIDState(e.target.value.trim());
+        }
+
+        function handlePasswordChange(e) {
+            updatePasswordVisualState(e.target.value);
+        }
+
+        function updateSSIDState(value) {
+            const ssidInput = document.getElementById('manual-ssid');
+
+            if (value) {
+                document.querySelectorAll('.network-item').forEach(item =>
+                    item.classList.remove('selected')
+                );
+                selectedNetwork = null;
+                document.getElementById('connect-btn').textContent = `Connect to ${value}`;
+                ssidInput.classList.add('has-value');
+            } else {
+                ssidInput.classList.remove('has-value');
+                if (!selectedNetwork) {
+                    document.getElementById('connect-btn').textContent = 'Connect';
+                }
+            }
+        }
+
+        function updatePasswordVisualState(value) {
+            const passwordInput = document.getElementById('password');
+            if (value) {
+                passwordInput.classList.add('has-value');
+            } else {
+                passwordInput.classList.remove('has-value');
+            }
+        }
+
+        function syncInputValues() {
+            const ssidInput = document.getElementById('manual-ssid');
+            const passwordInput = document.getElementById('password');
+
+            const currentSSID = ssidInput.value.trim();
+            const currentPassword = passwordInput.value;
+
+            if (currentSSID !== lastInputValues.ssid) {
+                lastInputValues.ssid = currentSSID;
+                updateSSIDState(currentSSID);
+            }
+
+            if (currentPassword !== lastInputValues.password) {
+                lastInputValues.password = currentPassword;
+                updatePasswordVisualState(currentPassword);
+            }
+        }
+
+        function startInputPolling() {
+            if (inputPollingInterval) {
+                clearInterval(inputPollingInterval);
+            }
+            inputPollingInterval = setInterval(syncInputValues, 500);
+        }
+
+        async function getCredentials() {
+            const ssidInput = document.getElementById('manual-ssid');
+            const passwordInput = document.getElementById('password');
+
+            ssidInput.blur();
+            passwordInput.blur();
+
+            await new Promise(resolve => setTimeout(resolve, 50));
+
+            const manualSSID = ssidInput.value.trim();
+            const password = passwordInput.value;
+            const ssid = manualSSID || selectedNetwork || '';
+
+            return {
+                ssid: ssid,
+                password: password,
+                source: manualSSID ? 'manual' : (selectedNetwork ? 'selected' : 'none')
+            };
+        }
+
+        function validateCredentials(creds) {
+            const ssidInput = document.getElementById('manual-ssid');
+
+            if (!creds.ssid) {
+                if (creds.source === 'none') {
+                    ssidInput.classList.add('invalid');
+                    ssidInput.classList.remove('valid');
+                }
+                return { valid: false, error: 'Please select a network or enter SSID manually' };
+            }
+
+            if (creds.ssid.length > 32) {
+                ssidInput.classList.add('invalid');
+                ssidInput.classList.remove('valid');
+                return { valid: false, error: 'SSID must be 32 characters or less' };
+            }
+
+            if (creds.source === 'manual') {
+                ssidInput.classList.add('valid');
+                ssidInput.classList.remove('invalid');
+            }
+            return { valid: true };
+        }
+
+        const ConnectionState = {
+            IDLE: 'idle',
+            CONNECTING: 'connecting',
+            WAITING: 'waiting',
+            SUCCESS: 'success',
+            FAILED: 'failed'
+        };
+
+        let connectionState = ConnectionState.IDLE;
+        let connectionAttempts = 0;
+        const MAX_RETRY_ATTEMPTS = 2;
+
+        function mapErrorMessage(errorText, statusCode) {
+            const errorMappings = {
+                'invalid passphrase': 'Incorrect password. Please check and try again.',
+                'psk': 'Incorrect password. WPA/WPA2 networks require 8-63 characters.',
+                'not found': 'Network not found. It may be out of range or hidden.',
+                'timeout': 'Connection timed out. The network may be too far away.',
+                'association': 'Could not connect. Network may be at capacity.',
+                'authentication': 'Authentication failed. Please check your password.',
+                'dhcp': 'Connected but could not get IP address. Try again.',
+                'busy': 'WiFi adapter is busy. Please wait and try again.',
+                '400': 'Invalid request. Check your network name and password.',
+                '401': 'Authentication required. Enter the correct password.',
+                '403': 'Access denied. The network may be blocking this device.',
+                '404': 'Network not found. Try entering the name manually.',
+                '500': 'Server error. Please restart the setup.',
+                '502': 'Backend unavailable. Please wait and try again.',
+                '503': 'Service unavailable. Please try again shortly.',
+            };
+
+            const lowerError = (errorText || '').toLowerCase();
+            for (const [pattern, message] of Object.entries(errorMappings)) {
+                if (lowerError.includes(pattern) || String(statusCode) === pattern) {
+                    return message;
+                }
+            }
+
+            if (statusCode >= 500) return 'Server error occurred. Please try again.';
+            if (statusCode >= 400) return 'Connection failed. Check your credentials.';
+            return errorText || 'An unexpected error occurred.';
+        }
+
+        async function retryConnection(creds, attempt) {
+            const delay = Math.min(1000 * Math.pow(2, attempt), 5000);
+            await new Promise(resolve => setTimeout(resolve, delay));
+            return await attemptConnection(creds);
+        }
+
+        async function attemptConnection(creds) {
+            const response = await fetch('/connect', {
+                method: 'POST',
+                headers: {'Content-Type': 'application/json'},
+                body: JSON.stringify({
+                    ssid: creds.ssid,
+                    passphrase: creds.password || '',
+                    identity: ''
+                })
+            });
+
+            return {
+                ok: response.ok,
+                status: response.status,
+                text: await response.text()
+            };
+        }
+
         function switchTab(tab) {
             document.querySelectorAll('.tab').forEach(t => t.classList.remove('active'));
             document.querySelectorAll('.tab-content').forEach(c => c.classList.remove('active'));
@@ -308,7 +775,6 @@
             }
         }
 
-        // Show message
         function showMessage(text, type) {
             const msg = document.getElementById('message');
             msg.textContent = text;
@@ -316,68 +782,69 @@
             setTimeout(() => msg.classList.remove('show'), 5000);
         }
 
-        // Load WiFi networks
         async function loadNetworks() {
             try {
-                console.log('Fetching networks from /networks endpoint...');
                 const response = await fetch('/networks');
 
                 if (!response.ok) {
-                    throw new Error(`HTTP error! status: ${response.status}`);
+                    throw new Error(`HTTP error: ${response.status}`);
                 }
 
                 const networks = await response.json();
-                console.log('Networks received:', networks);
-
                 const container = document.getElementById('networks');
                 container.innerHTML = '';
 
                 if (!networks || networks.length === 0) {
-                    container.innerHTML = '<p style="color: #666; text-align: center;">No networks found. Make sure WiFi is enabled.</p>';
+                    container.innerHTML = '<div class="empty-state">No networks found. Enter name manually below.</div>';
                     document.getElementById('status').textContent = 'No networks detected';
                     return;
                 }
 
-                // Sort networks by signal strength
                 networks.sort((a, b) => (b.signal || 0) - (a.signal || 0));
 
                 networks.forEach(network => {
                     const item = document.createElement('div');
                     item.className = 'network-item';
 
-                    // Handle different possible field names from WiFi Connect
                     const ssid = network.ssid || network.SSID || 'Unknown';
                     const signal = network.signal || network.Signal || network.strength || 0;
                     const encrypted = network.encrypted !== undefined ? network.encrypted :
                                     network.security !== undefined ? (network.security !== 'Open') : true;
 
-                    item.innerHTML = `
-                        <div>
-                            <div class="network-name">${ssid}</div>
-                            <div class="signal-strength">Signal: ${signal}%</div>
-                        </div>
-                        <div>${encrypted ? '🔒' : '📡'}</div>
-                    `;
-                    item.onclick = () => {
-                        selectNetwork(ssid, item);
-                        console.log('Selected network:', ssid);
-                    };
+                    // Build DOM elements safely to prevent XSS from malicious SSIDs
+                    const infoDiv = document.createElement('div');
+                    const nameDiv = document.createElement('div');
+                    nameDiv.className = 'network-name';
+                    nameDiv.textContent = ssid;  // Safe: textContent escapes HTML
+                    const metaDiv = document.createElement('div');
+                    metaDiv.className = 'network-meta';
+                    metaDiv.textContent = `${signal}% signal`;
+                    infoDiv.appendChild(nameDiv);
+                    infoDiv.appendChild(metaDiv);
+
+                    const iconDiv = document.createElement('div');
+                    iconDiv.className = 'network-icon';
+                    iconDiv.innerHTML = encrypted ? '&#128274;' : '&#128246;';
+
+                    item.appendChild(infoDiv);
+                    item.appendChild(iconDiv);
+                    item.onclick = () => selectNetwork(ssid, item);
                     container.appendChild(item);
                 });
 
                 document.getElementById('status').textContent = `Found ${networks.length} network${networks.length !== 1 ? 's' : ''}`;
             } catch (error) {
-                console.error('Error loading networks:', error);
-                document.getElementById('networks').innerHTML = `
-                    <p style="color: red; text-align: center;">
-                        Error loading networks<br>
-                        <small>${error.message}</small>
-                    </p>`;
-                document.getElementById('status').textContent = 'Error scanning networks - check console for details';
+                const container = document.getElementById('networks');
+                container.innerHTML = '';
+                const errorDiv = document.createElement('div');
+                errorDiv.className = 'empty-state';
+                errorDiv.style.color = 'var(--error)';
+                errorDiv.textContent = `Error: ${error.message}`;  // Safe: textContent escapes
+                container.appendChild(errorDiv);
+                document.getElementById('status').textContent = 'Error scanning networks';
             }
         }
 
-        // Select network
         function selectNetwork(ssid, element) {
             document.querySelectorAll('.network-item').forEach(item =>
                 item.classList.remove('selected')
@@ -385,39 +852,21 @@
             element.classList.add('selected');
             selectedNetwork = ssid;
             document.getElementById('connect-btn').textContent = `Connect to ${ssid}`;
-            // Clear manual SSID field when selecting from list
             document.getElementById('manual-ssid').value = '';
+            document.getElementById('manual-ssid').classList.remove('has-value', 'valid', 'invalid');
         }
 
-        // Handle manual SSID entry
-        function onManualSSIDChange() {
-            const manualSSID = document.getElementById('manual-ssid').value.trim();
-            if (manualSSID) {
-                // Clear network selection
-                document.querySelectorAll('.network-item').forEach(item =>
-                    item.classList.remove('selected')
-                );
-                selectedNetwork = manualSSID;
-                document.getElementById('connect-btn').textContent = `Connect to ${manualSSID}`;
-            } else if (!selectedNetwork) {
-                document.getElementById('connect-btn').textContent = 'Connect to Network';
-            }
-        }
-
-        // Connect to WiFi
         async function connectWiFi() {
-            // Check for selected network or manual SSID entry
-            const manualSSID = document.getElementById('manual-ssid').value.trim();
-            const networkToConnect = selectedNetwork || manualSSID;
+            if (isConnecting) return;
 
-            if (!networkToConnect) {
-                showMessage('Please select a network or enter SSID manually', 'error');
+            const creds = await getCredentials();
+
+            const validation = validateCredentials(creds);
+            if (!validation.valid) {
+                showMessage(validation.error, 'error');
                 return;
             }
 
-            console.log('Attempting to connect to:', networkToConnect);
-
-            if (isConnecting) return;
             isConnecting = true;
 
             const btn = document.getElementById('connect-btn');
@@ -426,56 +875,58 @@
             btn.textContent = 'Connecting...';
 
             try {
-                // WiFi Connect expects JSON format
-                const connectionData = {
-                    ssid: networkToConnect,
-                    passphrase: document.getElementById('password').value || '',
-                    identity: '' // Optional field for enterprise WiFi
-                };
+                connectionState = ConnectionState.CONNECTING;
+                connectionAttempts = 0;
 
-                console.log('Connecting with data:', connectionData);
+                let result = await attemptConnection(creds);
+                connectionAttempts++;
 
-                const response = await fetch('/connect', {
-                    method: 'POST',
-                    headers: {'Content-Type': 'application/json'},
-                    body: JSON.stringify(connectionData)
-                });
+                while (!result.ok && result.status >= 500 && connectionAttempts < MAX_RETRY_ATTEMPTS) {
+                    btn.textContent = `Retrying... (${connectionAttempts}/${MAX_RETRY_ATTEMPTS})`;
+                    result = await retryConnection(creds, connectionAttempts);
+                    connectionAttempts++;
+                }
 
-                if (response.ok) {
-                    showMessage('Connecting to network... Device will restart networking.', 'success');
+                if (result.ok) {
+                    connectionState = ConnectionState.SUCCESS;
+                    showMessage('Connecting to network...', 'success');
                     document.getElementById('status').textContent = 'Connection initiated. Please wait...';
 
-                    // Save startup command if present
                     const startupCmd = document.getElementById('startup-cmd').value;
                     if (startupCmd) {
                         localStorage.setItem('startup_command', startupCmd);
                     }
 
-                    // WiFi Connect will automatically exit and restart networking
                     setTimeout(() => {
-                        document.getElementById('status').textContent = 'Device is connecting to WiFi. You may need to reconnect to the network.';
-                        showMessage('If connection is successful, the access point will disappear.', 'success');
+                        document.getElementById('status').textContent = 'Device connecting. You may need to reconnect.';
+                        showMessage('If successful, the setup network will disappear.', 'success');
                     }, 3000);
 
                     setTimeout(() => {
-                        document.getElementById('status').textContent = 'Connection process complete. If the AP is still visible, the connection may have failed.';
+                        connectionState = ConnectionState.WAITING;
+                        document.getElementById('status').textContent = 'Connection complete. If AP visible, connection may have failed.';
                     }, 10000);
                 } else {
-                    const errorText = await response.text();
-                    showMessage('Failed to connect: ' + (errorText || 'Please check password'), 'error');
-                    document.getElementById('status').textContent = 'Connection failed';
+                    connectionState = ConnectionState.FAILED;
+                    const friendlyError = mapErrorMessage(result.text, result.status);
+                    showMessage(friendlyError, 'error');
+                    document.getElementById('status').textContent = friendlyError;
                 }
             } catch (error) {
-                showMessage('Connection error: ' + error.message, 'error');
-                document.getElementById('status').textContent = 'Error connecting';
+                connectionState = ConnectionState.FAILED;
+                const friendlyError = mapErrorMessage(error.message, 0);
+                showMessage(friendlyError, 'error');
+                document.getElementById('status').textContent = friendlyError;
             } finally {
                 btn.disabled = false;
                 btn.textContent = originalText;
                 isConnecting = false;
+                if (connectionState !== ConnectionState.SUCCESS && connectionState !== ConnectionState.WAITING) {
+                    connectionState = ConnectionState.IDLE;
+                }
             }
         }
 
-        // Load startup command from config server
         async function loadStartupCommand() {
             try {
                 const response = await fetch('/startup');
@@ -484,19 +935,14 @@
                     document.getElementById('startup-cmd').value = data.command || '';
                 }
             } catch (error) {
-                console.log('Could not load startup command:', error);
-                // Try localStorage as fallback
                 const savedCmd = localStorage.getItem('startup_command');
                 if (savedCmd) {
                     document.getElementById('startup-cmd').value = savedCmd;
                 }
             }
-
-            // Also check system status
             checkSystemStatus();
         }
 
-        // Save startup command
         async function saveStartupCommand() {
             const command = document.getElementById('startup-cmd').value.trim();
 
@@ -508,60 +954,47 @@
                 });
 
                 if (response.ok) {
-                    showMessage('Startup command saved successfully!', 'success');
-                    // Also save to localStorage as backup
+                    showMessage('Startup command saved!', 'success');
                     localStorage.setItem('startup_command', command);
                 } else {
                     throw new Error('Failed to save');
                 }
             } catch (error) {
-                // If server not available, save to localStorage for later
                 localStorage.setItem('startup_command', command);
-                showMessage('Command saved locally. Will be applied after connection.', 'success');
+                showMessage('Saved locally. Will apply after connection.', 'success');
             }
         }
 
-        // Check system status
         async function checkSystemStatus() {
             try {
                 const response = await fetch('/status');
                 if (response.ok) {
                     const status = await response.json();
                     if (status.wifi_connected) {
-                        // We're connected, show status in startup tab
-                        const statusHtml = `
-                            <div class="info-box" style="margin-bottom: 20px; background: #d4edda; border-color: #28a745;">
-                                <h3 style="color: #155724;">System Status</h3>
-                                <p style="color: #155724;">
-                                    WiFi: Connected to ${status.ssid}<br>
-                                    Hostname: ${status.hostname}<br>
-                                    Access URL: http://${status.hostname}.local or http://[device-ip]
-                                </p>
-                            </div>
-                        `;
                         const startupTab = document.getElementById('startup-tab');
                         if (startupTab && !document.getElementById('system-status')) {
                             const statusDiv = document.createElement('div');
                             statusDiv.id = 'system-status';
-                            statusDiv.innerHTML = statusHtml;
+                            statusDiv.className = 'info-box success';
+                            statusDiv.style.marginBottom = 'var(--space-lg)';
+                            statusDiv.innerHTML = `
+                                <h3>Connected</h3>
+                                <p>WiFi: ${status.ssid}<br>Host: ${status.hostname}</p>
+                            `;
                             startupTab.insertBefore(statusDiv, startupTab.firstChild);
                         }
                     }
                 }
             } catch (error) {
-                console.log('Could not check system status:', error);
+                // Ignore
             }
         }
 
-        // Initialize
         window.onload = () => {
+            setupInputTracking();
             loadNetworks();
             loadStartupCommand();
-
-            // Refresh networks every 10 seconds
             setInterval(loadNetworks, 10000);
-
-            // Check system status periodically
             setInterval(checkSystemStatus, 5000);
         };
     </script>

@@ -180,7 +180,7 @@ install_wifi_connect() {
 
     # Download directly from GitHub releases
     log "Downloading WiFi Connect from GitHub releases..."
-    WIFI_CONNECT_VERSION="v4.11.84"  # Latest actual release (as of Oct 2024)
+    WIFI_CONNECT_VERSION="v4.11.84"  # Latest release (July 2025)
     DOWNLOAD_URL="https://github.com/balena-os/wifi-connect/releases/download/${WIFI_CONNECT_VERSION}/wifi-connect-${WIFI_CONNECT_ARCH}.tar.gz"
 
     # Show which Pi model we're installing for
@@ -269,15 +269,20 @@ update_components() {
         "$INSTALL_DIR/scripts/ensure-network-persistence.sh" >> "$LOG_FILE" 2>&1 || true
     fi
 
-    # Use enhanced config server if available, fallback to basic version
-    if [ -f "$REPO_DIR/scripts/config-server-enhanced.py" ]; then
-        cp "$REPO_DIR/scripts/config-server-enhanced.py" "$INSTALL_DIR/scripts/config-server.py"
-        chmod +x "$INSTALL_DIR/scripts/config-server.py"
-        success "Enhanced config server installed"
-    elif [ -f "$REPO_DIR/scripts/config-server.py" ]; then
+    # Install config server
+    if [ -f "$REPO_DIR/scripts/config-server.py" ]; then
         cp "$REPO_DIR/scripts/config-server.py" "$INSTALL_DIR/scripts/"
         chmod +x "$INSTALL_DIR/scripts/config-server.py"
-        success "Basic config server installed"
+        success "Config server installed"
+    else
+        error "Config server script not found!"
+    fi
+
+    # Install captive portal proxy for proper platform detection
+    if [ -f "$REPO_DIR/scripts/captive-portal-proxy.py" ]; then
+        cp "$REPO_DIR/scripts/captive-portal-proxy.py" "$INSTALL_DIR/scripts/"
+        chmod +x "$INSTALL_DIR/scripts/captive-portal-proxy.py"
+        success "Captive portal proxy installed"
     fi
 
     success "Scripts updated"
@@ -288,6 +293,7 @@ update_services() {
     log "Updating systemd services..."
 
     # WiFi Connect service - ONLY runs when no WiFi connection
+    # NOTE: Runs on port 8080 - captive portal proxy handles port 80
     cat > /etc/systemd/system/wifi-connect.service << EOF
 [Unit]
 Description=Balena WiFi Connect - Captive Portal (only when disconnected)
@@ -301,12 +307,34 @@ ExecStart=/usr/local/bin/wifi-connect \\
     --portal-ssid "Ossuary-Setup" \\
     --ui-directory $CUSTOM_UI_DIR \\
     --activity-timeout 600 \\
-    --portal-listening-port 80
+    --portal-listening-port 8080
 Restart=no
 Environment="DBUS_SYSTEM_BUS_ADDRESS=unix:path=/run/dbus/system_bus_socket"
 
 [Install]
 # Not enabled by default - managed by wifi-connect-manager
+EOF
+
+    # Captive Portal Proxy - handles platform-specific detection on port 80
+    cat > /etc/systemd/system/captive-portal-proxy.service << EOF
+[Unit]
+Description=Captive Portal Detection Proxy
+After=NetworkManager.service wifi-connect.service
+Wants=wifi-connect.service
+
+[Service]
+Type=simple
+ExecStart=/usr/bin/python3 $INSTALL_DIR/scripts/captive-portal-proxy.py
+Restart=always
+RestartSec=5
+User=root
+AmbientCapabilities=CAP_NET_BIND_SERVICE
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=captive-portal-proxy
+
+[Install]
+WantedBy=multi-user.target
 EOF
 
     # Process manager service (keeps command running)
@@ -459,6 +487,7 @@ EOF
     log "Enabling and restarting services..."
     # Note: wifi-connect is NOT enabled - managed by wifi-connect-manager
     systemctl enable wifi-connect-manager.service >> "$LOG_FILE" 2>&1
+    systemctl enable captive-portal-proxy.service >> "$LOG_FILE" 2>&1
     systemctl enable ossuary-startup.service >> "$LOG_FILE" 2>&1
     systemctl enable ossuary-web.service >> "$LOG_FILE" 2>&1
 
@@ -469,6 +498,10 @@ EOF
     log "Starting WiFi Connect Manager..."
     systemctl restart wifi-connect-manager 2>/dev/null || warning "WiFi Connect Manager may need manual start"
     sleep 2  # Give it time to start
+
+    # Start captive portal proxy (handles port 80 with proper platform detection)
+    log "Starting captive portal proxy..."
+    systemctl restart captive-portal-proxy 2>/dev/null || warning "Captive portal proxy may need manual start"
 
     # Start web configuration server (always available on port 8080)
     log "Starting web configuration service..."
@@ -482,10 +515,6 @@ EOF
     cp "$REPO_DIR/uninstall.sh" "$INSTALL_DIR/" 2>/dev/null || true
     chmod +x "$INSTALL_DIR/uninstall.sh" 2>/dev/null || true
 
-    if [ -f "$REPO_DIR/fix-wifi-connect.sh" ]; then
-        cp "$REPO_DIR/fix-wifi-connect.sh" "$INSTALL_DIR/" 2>/dev/null || true
-        chmod +x "$INSTALL_DIR/fix-wifi-connect.sh" 2>/dev/null || true
-    fi
 
     # Step 8: Verify installation
     log "Verifying installation..."
@@ -497,7 +526,11 @@ EOF
     fi
 
     if ! systemctl is-active --quiet wifi-connect; then
-        warning "WiFi Connect service is not running"
+        warning "WiFi Connect service is not running (may be normal if WiFi is connected)"
+    fi
+
+    if ! systemctl is-active --quiet captive-portal-proxy; then
+        warning "Captive portal proxy is not running"
         issues=$((issues + 1))
     fi
 
@@ -749,14 +782,20 @@ main() {
                 echo "Services status:"
 
                 # Check each service
-                if systemctl is-active --quiet wifi-connect; then
-                    echo -e "  ${GREEN}✓${NC} WiFi Connect (captive portal) - Running"
+                if systemctl is-active --quiet captive-portal-proxy; then
+                    echo -e "  ${GREEN}✓${NC} Captive portal proxy - Running on port 80"
                 else
-                    echo -e "  ${RED}✗${NC} WiFi Connect - Not running (run: sudo systemctl start wifi-connect)"
+                    echo -e "  ${RED}✗${NC} Captive portal proxy - Not running (run: sudo systemctl start captive-portal-proxy)"
+                fi
+
+                if systemctl is-active --quiet wifi-connect; then
+                    echo -e "  ${GREEN}✓${NC} WiFi Connect (backend) - Running on port 8080"
+                else
+                    echo -e "  ${YELLOW}⚠${NC} WiFi Connect - Not running (may be normal if WiFi is connected)"
                 fi
 
                 if systemctl is-active --quiet ossuary-web; then
-                    echo -e "  ${GREEN}✓${NC} Web config server - Running on port 80"
+                    echo -e "  ${GREEN}✓${NC} Web config server - Running on port 8080"
                 else
                     echo -e "  ${RED}✗${NC} Web config server - Not running (run: sudo systemctl start ossuary-web)"
                 fi
@@ -777,22 +816,25 @@ main() {
                 echo -e "${BLUE}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}"
                 echo ""
                 echo "📊 Check Status:"
-                echo "  sudo systemctl status wifi-connect      # WiFi/AP service"
-                echo "  sudo systemctl status ossuary-web       # Config web server"
-                echo "  sudo systemctl status ossuary-startup   # Startup command service"
-                echo "  ./check-status.sh                       # Overall system status"
+                echo "  sudo systemctl status captive-portal-proxy  # Captive portal proxy (port 80)"
+                echo "  sudo systemctl status wifi-connect          # WiFi Connect backend (port 8080)"
+                echo "  sudo systemctl status ossuary-web           # Config web server"
+                echo "  sudo systemctl status ossuary-startup       # Startup command service"
+                echo "  ./check-status.sh                           # Overall system status"
                 echo ""
                 echo "📝 View Logs:"
+                echo "  journalctl -u captive-portal-proxy -f  # Captive portal proxy logs (live)"
                 echo "  journalctl -u wifi-connect -f          # WiFi Connect logs (live)"
                 echo "  journalctl -u ossuary-web -f           # Web server logs (live)"
                 echo "  journalctl -u ossuary-startup          # Startup command logs"
                 echo "  cat /var/log/ossuary-startup.log       # Startup command output"
                 echo ""
                 echo "🔧 Manage Services:"
-                echo "  sudo systemctl restart wifi-connect    # Restart WiFi/AP service"
-                echo "  sudo systemctl restart ossuary-web     # Restart config server"
-                echo "  sudo systemctl stop wifi-connect       # Stop WiFi service"
-                echo "  sudo systemctl start wifi-connect      # Start WiFi service"
+                echo "  sudo systemctl restart captive-portal-proxy  # Restart portal proxy"
+                echo "  sudo systemctl restart wifi-connect          # Restart WiFi/AP backend"
+                echo "  sudo systemctl restart ossuary-web           # Restart config server"
+                echo "  sudo systemctl stop wifi-connect             # Stop WiFi service"
+                echo "  sudo systemctl start wifi-connect            # Start WiFi service"
                 echo ""
                 echo "🌐 Network Commands:"
                 echo "  nmcli device wifi list                 # List WiFi networks"
