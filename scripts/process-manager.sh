@@ -17,9 +17,9 @@ CHROMIUM_WEBGPU_FLAGS="--enable-features=Vulkan,UseSkiaRenderer,WebGPU --enable-
 # Ensure log directory exists
 mkdir -p "$(dirname "$LOG_FILE")"
 
-# Function to log messages
+# Function to log messages (outputs to stderr so it doesn't interfere with command substitution)
 log() {
-    echo "[$(date '+%Y-%m-%d %H:%M:%S')] $1" | tee -a "$LOG_FILE"
+    echo "[$(date '+%Y-%m-%d %H:%M:%S')] $1" | tee -a "$LOG_FILE" >&2
 }
 
 # Function to get command from config
