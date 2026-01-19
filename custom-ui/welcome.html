@@ -31,8 +31,8 @@
             flex-direction: column;
             align-items: center;
             justify-content: center;
-            /* Extra padding for round/unusual displays - keeps content in safe zone */
-            padding: 10vh 10vw;
+            /* Equal padding on all sides for round/square displays - keeps content in center safe zone */
+            padding: 12vmin;
             text-align: center;
         }
 
@@ -168,7 +168,7 @@
         /* Small screens - maintain safe zone for round displays */
         @media (max-width: 480px) {
             body {
-                padding: 8vh 8vw;
+                padding: 10vmin;
             }
 
             h1 {
@@ -188,8 +188,8 @@
         /* For small kiosk displays and round screens */
         @media (max-height: 600px) {
             body {
-                /* Keep generous padding for round displays */
-                padding: 12vh 12vw;
+                /* Keep generous equal padding for round displays */
+                padding: 10vmin;
                 justify-content: center;
             }
 
@@ -265,7 +265,7 @@
         /* Very small round displays (e.g., 240px) */
         @media (max-width: 300px), (max-height: 300px) {
             body {
-                padding: 15% 15%;
+                padding: 15vmin;
             }
 
             .logo svg {
