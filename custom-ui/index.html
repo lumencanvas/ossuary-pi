@@ -2,1001 +2,1015 @@
 <html lang="en">
 <head>
     <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
     <title>Ossuary Setup</title>
     <link href="https://fonts.googleapis.com/css2?family=Space+Mono:wght@400;700&family=Sora:wght@600;700&family=IBM+Plex+Mono:wght@400;500&display=swap" rel="stylesheet">
     <style>
-        /* ========================================
-           CSS RESET & ROOT VARIABLES
-           ======================================== */
-        * {
-            margin: 0;
-            padding: 0;
-            box-sizing: border-box;
-        }
+        * { margin: 0; padding: 0; box-sizing: border-box; }
 
         :root {
-            /* Paper & Ink (Light Mode) */
-            --paper: #f5f1eb;
-            --paper-warm: #faf6f0;
-            --paper-dark: #e8e4de;
-            --ink: #1a1a1a;
-            --ink-soft: #3a3a3a;
-            --ink-muted: #6a6a6a;
-
-            /* Primary Accent */
-            --teal: #0d9488;
-            --teal-dark: #0f766e;
-            --teal-light: #5eead4;
+            --paper: #f5f1eb; --paper-warm: #faf6f0; --paper-dark: #e8e4de;
+            --ink: #1a1a1a; --ink-soft: #3a3a3a; --ink-muted: #6a6a6a;
+            --teal: #0d9488; --teal-dark: #0f766e; --teal-light: #5eead4;
             --teal-muted: rgba(13, 148, 136, 0.1);
-
-            /* Utilities */
+            --lc-blue: #8ED3EF; --lc-blue-muted: rgba(142, 211, 239, 0.15);
             --border: rgba(26, 26, 26, 0.15);
-            --success: #059669;
-            --success-bg: rgba(5, 150, 105, 0.1);
-            --error: #dc2626;
-            --error-bg: rgba(220, 38, 38, 0.1);
-
-            /* Spacing */
-            --space-xs: 4px;
-            --space-sm: 8px;
-            --space-md: 12px;
-            --space-lg: 16px;
-            --space-xl: 24px;
-            --space-2xl: 40px;
+            --success: #059669; --success-bg: rgba(5, 150, 105, 0.1);
+            --error: #dc2626; --error-bg: rgba(220, 38, 38, 0.1);
+            --warning: #d97706; --warning-bg: rgba(217, 119, 6, 0.1);
+            --space-xs: 4px; --space-sm: 8px; --space-md: 12px;
+            --space-lg: 16px; --space-xl: 24px;
         }
 
         [data-theme="dark"] {
-            --paper: #1a1a1a;
-            --paper-warm: #222222;
-            --paper-dark: #2a2a2a;
-            --ink: #f5f1eb;
-            --ink-soft: #c5c5c5;
-            --ink-muted: #888888;
-            --teal: #14b8a6;
-            --teal-dark: #0d9488;
-            --teal-muted: rgba(20, 184, 166, 0.15);
+            --paper: #1a1a1a; --paper-warm: #222222; --paper-dark: #2a2a2a;
+            --ink: #f5f1eb; --ink-soft: #c5c5c5; --ink-muted: #888888;
+            --teal: #14b8a6; --teal-muted: rgba(20, 184, 166, 0.15);
             --border: rgba(255, 255, 255, 0.12);
         }
 
         body {
             font-family: 'IBM Plex Mono', monospace;
-            background: var(--paper);
-            color: var(--ink);
-            line-height: 1.6;
-            font-size: 14px;
-            min-height: 100vh;
-            display: flex;
-            justify-content: center;
-            align-items: flex-start;
-            padding: var(--space-xl);
+            background: var(--paper); color: var(--ink);
+            line-height: 1.6; font-size: 14px;
+            min-height: 100vh; padding: var(--space-lg);
         }
 
-        /* Noise texture overlay */
         body::after {
-            content: '';
-            position: fixed;
-            top: 0;
-            left: 0;
-            width: 100%;
-            height: 100%;
+            content: ''; position: fixed; top: 0; left: 0; width: 100%; height: 100%;
             background: url("data:image/svg+xml,%3Csvg viewBox='0 0 256 256' xmlns='http://www.w3.org/2000/svg'%3E%3Cfilter id='noise'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.8' numOctaves='4' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23noise)'/%3E%3C/svg%3E");
-            opacity: 0.025;
-            pointer-events: none;
-            z-index: 9999;
+            opacity: 0.025; pointer-events: none; z-index: 9999;
         }
 
-        /* ========================================
-           CONTAINER
-           ======================================== */
         .container {
-            background: var(--paper-warm);
-            border: 1px solid var(--ink);
-            max-width: 480px;
-            width: 100%;
-            position: relative;
+            background: var(--paper-warm); border: 1px solid var(--ink);
+            max-width: 560px; width: 100%; margin: 0 auto; position: relative;
         }
 
-        /* Corner accents */
-        .container::before,
-        .container::after {
-            content: '';
-            position: absolute;
-            width: 12px;
-            height: 12px;
+        .container::before, .container::after {
+            content: ''; position: absolute; width: 12px; height: 12px;
             border: 1px solid var(--teal);
         }
+        .container::before { top: -6px; left: -6px; border-right: none; border-bottom: none; }
+        .container::after { bottom: -6px; right: -6px; border-left: none; border-top: none; }
 
-        .container::before {
-            top: -6px;
-            left: -6px;
-            border-right: none;
-            border-bottom: none;
-        }
-
-        .container::after {
-            bottom: -6px;
-            right: -6px;
-            border-left: none;
-            border-top: none;
-        }
-
-        /* ========================================
-           HEADER
-           ======================================== */
+        /* Header */
         .header {
-            padding: var(--space-xl);
-            border-bottom: 1px solid var(--ink);
+            padding: var(--space-xl); border-bottom: 1px solid var(--ink);
+            display: flex; align-items: center; gap: var(--space-lg);
         }
-
+        .header-logo { width: 48px; height: 48px; flex-shrink: 0; }
+        .header-content { flex: 1; }
         .header-label {
-            font-family: 'Space Mono', monospace;
-            font-size: 10px;
-            text-transform: uppercase;
-            letter-spacing: 2px;
-            color: var(--teal);
-            margin-bottom: var(--space-sm);
-            display: flex;
-            align-items: center;
-            gap: 10px;
+            font-family: 'Space Mono', monospace; font-size: 10px;
+            text-transform: uppercase; letter-spacing: 2px; color: var(--teal);
+            margin-bottom: var(--space-xs); display: flex; align-items: center; gap: 10px;
         }
-
-        .header-label::before {
-            content: '';
-            width: 20px;
-            height: 1px;
-            background: var(--teal);
-        }
-
+        .header-label::before { content: ''; width: 20px; height: 1px; background: var(--teal); }
         .header h1 {
-            font-family: 'Sora', sans-serif;
-            font-size: 24px;
-            font-weight: 700;
-            letter-spacing: -0.5px;
-            color: var(--ink);
-            margin-bottom: var(--space-xs);
+            font-family: 'Sora', sans-serif; font-size: 22px; font-weight: 700;
+            letter-spacing: -0.5px; margin-bottom: 2px;
         }
+        .header p { font-size: 12px; color: var(--ink-muted); }
 
-        .header p {
-            font-size: 13px;
-            color: var(--ink-muted);
-        }
-
-        /* ========================================
-           TABS
-           ======================================== */
-        .tab-container {
-            display: flex;
-            border-bottom: 1px solid var(--ink);
-        }
-
+        /* Tabs */
+        .tab-container { display: flex; border-bottom: 1px solid var(--ink); overflow-x: auto; }
         .tab {
-            flex: 1;
-            padding: var(--space-md) var(--space-lg);
-            font-family: 'Space Mono', monospace;
-            font-size: 11px;
-            text-transform: uppercase;
-            letter-spacing: 0.5px;
-            background: var(--paper);
-            border: none;
-            border-right: 1px solid var(--ink);
-            color: var(--ink-muted);
-            cursor: pointer;
-            transition: all 0.15s;
+            flex: 1; min-width: 80px; padding: var(--space-md) var(--space-sm);
+            font-family: 'Space Mono', monospace; font-size: 10px;
+            text-transform: uppercase; letter-spacing: 0.5px;
+            background: var(--paper); border: none; border-right: 1px solid var(--ink);
+            color: var(--ink-muted); cursor: pointer; transition: all 0.15s;
+            white-space: nowrap;
         }
-
-        .tab:last-child {
-            border-right: none;
-        }
-
-        .tab:hover {
-            background: var(--teal-muted);
-            color: var(--ink);
-        }
-
+        .tab:last-child { border-right: none; }
+        .tab:hover { background: var(--teal-muted); color: var(--ink); }
         .tab.active {
-            background: var(--teal-muted);
-            color: var(--teal);
-            border-bottom: 2px solid var(--teal);
-            margin-bottom: -1px;
+            background: var(--teal-muted); color: var(--teal);
+            border-bottom: 2px solid var(--teal); margin-bottom: -1px;
         }
 
-        .tab-content {
-            display: none;
-            padding: var(--space-xl);
-        }
+        .tab-content { display: none; padding: var(--space-xl); }
+        .tab-content.active { display: block; }
 
-        .tab-content.active {
-            display: block;
-        }
-
-        /* ========================================
-           MESSAGES
-           ======================================== */
-        .message {
-            padding: var(--space-md);
-            margin-bottom: var(--space-lg);
-            font-size: 12px;
-            display: none;
-            border-left: 3px solid;
-        }
-
-        .message.success {
-            background: var(--success-bg);
-            color: var(--success);
-            border-color: var(--success);
-        }
-
-        .message.error {
-            background: var(--error-bg);
-            color: var(--error);
-            border-color: var(--error);
-        }
-
-        .message.show {
-            display: block;
-        }
-
-        /* ========================================
-           NETWORK LIST
-           ======================================== */
+        /* Form elements */
         .section-label {
-            font-family: 'Space Mono', monospace;
-            font-size: 10px;
-            text-transform: uppercase;
-            letter-spacing: 1px;
-            color: var(--ink-muted);
+            font-family: 'Space Mono', monospace; font-size: 10px;
+            text-transform: uppercase; letter-spacing: 1px; color: var(--ink-muted);
             margin-bottom: var(--space-sm);
         }
-
-        .network-list {
-            max-height: 240px;
-            overflow-y: auto;
-            margin-bottom: var(--space-lg);
-            border: 1px solid var(--border);
-        }
-
-        .network-item {
-            padding: var(--space-md);
-            background: var(--paper);
-            border-bottom: 1px solid var(--border);
-            cursor: pointer;
-            transition: all 0.15s;
-            display: flex;
-            justify-content: space-between;
-            align-items: center;
-        }
-
-        .network-item:last-child {
-            border-bottom: none;
-        }
-
-        .network-item:hover {
-            background: var(--teal-muted);
-        }
-
-        .network-item.selected {
-            background: var(--teal-muted);
-            border-left: 3px solid var(--teal);
-        }
-
-        .network-name {
-            font-family: 'Space Mono', monospace;
-            font-size: 12px;
-            font-weight: 700;
-            color: var(--ink);
-        }
-
-        .network-meta {
-            font-size: 10px;
-            color: var(--ink-muted);
-            margin-top: 2px;
-        }
-
-        .network-icon {
-            font-size: 14px;
-            opacity: 0.6;
-        }
-
-        /* ========================================
-           FORM ELEMENTS
-           ======================================== */
-        .input-group {
-            margin-bottom: var(--space-lg);
-        }
-
+        .input-group { margin-bottom: var(--space-lg); }
         .input-group label {
-            display: block;
-            font-family: 'Space Mono', monospace;
-            font-size: 10px;
-            text-transform: uppercase;
-            letter-spacing: 1px;
-            color: var(--ink-muted);
+            display: block; font-family: 'Space Mono', monospace; font-size: 10px;
+            text-transform: uppercase; letter-spacing: 1px; color: var(--ink-muted);
             margin-bottom: var(--space-sm);
         }
-
-        input, textarea {
-            width: 100%;
-            padding: var(--space-md);
-            font-family: 'IBM Plex Mono', monospace;
-            font-size: 13px;
-            background: var(--paper);
-            border: 1px solid var(--border);
-            color: var(--ink);
-            transition: border-color 0.15s;
+        input, textarea, select {
+            width: 100%; padding: var(--space-md);
+            font-family: 'IBM Plex Mono', monospace; font-size: 13px;
+            background: var(--paper); border: 1px solid var(--border); color: var(--ink);
         }
+        input:focus, textarea:focus, select:focus { outline: none; border-color: var(--teal); }
+        input::placeholder, textarea::placeholder { color: var(--ink-muted); }
+        textarea { resize: vertical; min-height: 80px; }
+        select { cursor: pointer; }
 
-        input:focus, textarea:focus {
-            outline: none;
-            border-color: var(--teal);
-        }
-
-        input::placeholder, textarea::placeholder {
-            color: var(--ink-muted);
-        }
-
-        textarea {
-            resize: vertical;
-            min-height: 100px;
-        }
-
-        /* Autofill detection and visual feedback */
-        input.has-value {
-            border-color: var(--teal);
-            background: var(--teal-muted);
-        }
-
-        input.valid {
-            border-color: var(--success);
-            background: var(--success-bg);
-        }
-
-        input.invalid {
-            border-color: var(--error);
-            background: var(--error-bg);
-        }
-
-        /* Webkit autofill detection */
-        @keyframes onAutoFillStart {
-            from { /* empty */ }
-            to { /* empty */ }
-        }
-
-        input:-webkit-autofill {
-            animation-name: onAutoFillStart;
-            animation-duration: 0.001s;
-        }
-
-        /* ========================================
-           BUTTONS
-           ======================================== */
+        /* Buttons */
         .btn-primary {
-            font-family: 'Space Mono', monospace;
-            font-size: 11px;
-            text-transform: uppercase;
-            letter-spacing: 0.5px;
+            font-family: 'Space Mono', monospace; font-size: 11px;
+            text-transform: uppercase; letter-spacing: 0.5px;
             padding: var(--space-md) var(--space-lg);
-            background: var(--teal);
-            border: 1px solid var(--teal);
-            color: white;
-            cursor: pointer;
-            width: 100%;
-            transition: all 0.15s;
+            background: var(--teal); border: 1px solid var(--teal); color: white;
+            cursor: pointer; width: 100%; transition: all 0.15s;
         }
-
-        .btn-primary:hover {
-            background: var(--teal-dark);
-            border-color: var(--teal-dark);
-        }
-
-        .btn-primary:disabled {
-            opacity: 0.5;
-            cursor: not-allowed;
-        }
+        .btn-primary:hover { background: var(--teal-dark); }
+        .btn-primary:disabled { opacity: 0.5; cursor: not-allowed; }
 
         .btn-secondary {
-            font-family: 'Space Mono', monospace;
-            font-size: 11px;
-            text-transform: uppercase;
-            letter-spacing: 0.5px;
+            font-family: 'Space Mono', monospace; font-size: 11px;
+            text-transform: uppercase; letter-spacing: 0.5px;
             padding: var(--space-md) var(--space-lg);
-            background: transparent;
-            border: 1px solid var(--border);
-            color: var(--ink);
+            background: transparent; border: 1px solid var(--border); color: var(--ink);
+            cursor: pointer; width: 100%; margin-top: var(--space-sm);
+        }
+        .btn-secondary:hover { border-color: var(--ink); }
+
+        .btn-small {
+            font-family: 'Space Mono', monospace; font-size: 9px;
+            text-transform: uppercase; padding: var(--space-xs) var(--space-sm);
+            background: var(--paper-dark); border: 1px solid var(--border); color: var(--ink);
             cursor: pointer;
-            width: 100%;
-            margin-top: var(--space-sm);
-            transition: all 0.15s;
         }
+        .btn-small:hover { border-color: var(--teal); color: var(--teal); }
+        .btn-small.danger:hover { border-color: var(--error); color: var(--error); }
 
-        .btn-secondary:hover {
-            border-color: var(--ink);
+        /* Messages & Info */
+        .message {
+            padding: var(--space-md); margin-bottom: var(--space-lg); font-size: 12px;
+            display: none; border-left: 3px solid;
         }
+        .message.success { background: var(--success-bg); color: var(--success); border-color: var(--success); }
+        .message.error { background: var(--error-bg); color: var(--error); border-color: var(--error); }
+        .message.show { display: block; }
 
-        /* ========================================
-           INFO BOX
-           ======================================== */
         .info-box {
-            background: var(--paper);
-            border-left: 3px solid var(--teal);
-            padding: var(--space-md);
-            margin-top: var(--space-lg);
+            background: var(--paper); border-left: 3px solid var(--teal);
+            padding: var(--space-md); margin-top: var(--space-lg);
         }
-
         .info-box h3 {
-            font-family: 'Space Mono', monospace;
-            font-size: 10px;
-            text-transform: uppercase;
-            letter-spacing: 1px;
-            color: var(--teal);
+            font-family: 'Space Mono', monospace; font-size: 10px;
+            text-transform: uppercase; letter-spacing: 1px; color: var(--teal);
             margin-bottom: var(--space-xs);
         }
-
-        .info-box p {
-            font-size: 12px;
-            color: var(--ink-muted);
-            line-height: 1.5;
+        .info-box p { font-size: 12px; color: var(--ink-muted); line-height: 1.5; }
+        .info-box code {
+            font-family: 'IBM Plex Mono', monospace;
+            background: var(--paper-dark); padding: 2px 6px; font-size: 12px; color: var(--teal);
         }
 
-        .info-box.success {
-            border-color: var(--success);
-            background: var(--success-bg);
+        /* Network list */
+        .network-list { max-height: 200px; overflow-y: auto; margin-bottom: var(--space-lg); border: 1px solid var(--border); }
+        .network-item {
+            padding: var(--space-md); background: var(--paper);
+            border-bottom: 1px solid var(--border); cursor: pointer;
+            display: flex; justify-content: space-between; align-items: center;
+        }
+        .network-item:last-child { border-bottom: none; }
+        .network-item:hover { background: var(--teal-muted); }
+        .network-item.selected { background: var(--teal-muted); border-left: 3px solid var(--teal); }
+        .network-name { font-family: 'Space Mono', monospace; font-size: 12px; font-weight: 700; }
+        .network-meta { font-size: 10px; color: var(--ink-muted); margin-top: 2px; }
+        .network-actions { display: flex; gap: var(--space-xs); }
+
+        /* Saved networks */
+        .saved-network-item {
+            padding: var(--space-md); background: var(--paper); border: 1px solid var(--border);
+            margin-bottom: var(--space-sm); display: flex; justify-content: space-between; align-items: center;
+        }
+        .saved-network-info { flex: 1; }
+        .saved-network-ssid { font-family: 'Space Mono', monospace; font-weight: 700; font-size: 13px; }
+        .saved-network-notes { font-size: 11px; color: var(--ink-muted); margin-top: 2px; }
+        .saved-network-meta { font-size: 10px; color: var(--ink-muted); margin-top: 4px; }
+
+        /* Presets */
+        .preset-grid { display: flex; flex-direction: column; gap: var(--space-md); margin-bottom: var(--space-lg); }
+        .preset-card {
+            background: var(--paper); border: 1px solid var(--border);
+            padding: var(--space-lg); cursor: pointer; display: flex;
+            align-items: center; gap: var(--space-lg);
+        }
+        .preset-card:hover { border-color: var(--teal); background: var(--teal-muted); }
+        .preset-card.lumencanvas { border-color: var(--lc-blue); }
+        .preset-card.lumencanvas:hover { background: var(--lc-blue-muted); }
+        .preset-icon { width: 40px; height: 40px; flex-shrink: 0; display: flex; align-items: center; justify-content: center; font-size: 24px; }
+        .preset-icon svg { width: 40px; height: 40px; }
+        .preset-content { flex: 1; }
+        .preset-name { font-family: 'Sora', sans-serif; font-size: 14px; font-weight: 600; margin-bottom: 2px; }
+        .preset-desc { font-size: 11px; color: var(--ink-muted); }
+        .preset-tags { display: flex; gap: var(--space-xs); margin-top: var(--space-xs); }
+        .preset-tag {
+            font-family: 'Space Mono', monospace; font-size: 9px;
+            text-transform: uppercase; letter-spacing: 0.5px;
+            padding: 2px 6px; background: var(--paper-dark); color: var(--ink-muted);
         }
 
-        .info-box.success h3 {
-            color: var(--success);
+        /* Config panels */
+        .config-panel { display: none; border: 1px solid var(--border); padding: var(--space-lg); margin-bottom: var(--space-lg); background: var(--paper); }
+        .config-panel.active { display: block; }
+        .config-panel h4 {
+            font-family: 'Space Mono', monospace; font-size: 11px;
+            text-transform: uppercase; letter-spacing: 1px; color: var(--teal);
+            margin-bottom: var(--space-md); padding-bottom: var(--space-sm);
+            border-bottom: 1px solid var(--border);
         }
-
-        .info-box.success p {
-            color: var(--success);
+        .checkbox-group { display: flex; flex-direction: column; gap: var(--space-sm); margin-bottom: var(--space-lg); }
+        .checkbox-item { display: flex; align-items: center; gap: var(--space-sm); cursor: pointer; }
+        .checkbox-item input[type="checkbox"] { width: auto; margin: 0; }
+        .checkbox-item label { margin: 0; font-size: 12px; color: var(--ink-soft); cursor: pointer; }
+        .back-link {
+            font-family: 'Space Mono', monospace; font-size: 11px;
+            color: var(--ink-muted); cursor: pointer; margin-bottom: var(--space-lg); display: inline-block;
         }
+        .back-link:hover { color: var(--teal); }
 
-        /* ========================================
-           SPINNER
-           ======================================== */
+        /* Schedule */
+        .schedule-list { margin-bottom: var(--space-lg); }
+        .schedule-item {
+            padding: var(--space-md); background: var(--paper); border: 1px solid var(--border);
+            margin-bottom: var(--space-sm); display: flex; justify-content: space-between; align-items: center;
+        }
+        .schedule-item.disabled { opacity: 0.5; }
+        .schedule-info { flex: 1; }
+        .schedule-name { font-family: 'Space Mono', monospace; font-weight: 700; font-size: 13px; }
+        .schedule-details { font-size: 11px; color: var(--ink-muted); margin-top: 4px; }
+        .schedule-time { font-family: 'Space Mono', monospace; font-size: 12px; color: var(--teal); }
+        .schedule-days { display: flex; gap: 2px; margin-top: var(--space-xs); }
+        .schedule-day {
+            font-family: 'Space Mono', monospace; font-size: 9px;
+            padding: 2px 4px; background: var(--paper-dark); color: var(--ink-muted);
+        }
+        .schedule-day.active { background: var(--teal-muted); color: var(--teal); }
+
+        /* Day picker */
+        .day-picker { display: flex; gap: var(--space-xs); margin: var(--space-sm) 0; }
+        .day-btn {
+            font-family: 'Space Mono', monospace; font-size: 10px;
+            padding: var(--space-sm) var(--space-md);
+            background: var(--paper); border: 1px solid var(--border);
+            cursor: pointer; color: var(--ink-muted);
+        }
+        .day-btn:hover { border-color: var(--teal); }
+        .day-btn.selected { background: var(--teal-muted); border-color: var(--teal); color: var(--teal); }
+
+        /* Time input */
+        .time-input-group { display: flex; gap: var(--space-sm); align-items: center; }
+        .time-input-group input[type="time"] { width: auto; flex: 1; }
+        .time-input-group span { font-size: 12px; color: var(--ink-muted); }
+
+        /* Modal */
+        .modal-overlay {
+            display: none; position: fixed; top: 0; left: 0; width: 100%; height: 100%;
+            background: rgba(0,0,0,0.5); z-index: 1000; justify-content: center; align-items: center;
+        }
+        .modal-overlay.show { display: flex; }
+        .modal {
+            background: var(--paper-warm); border: 1px solid var(--ink);
+            max-width: 400px; width: 90%; max-height: 80vh; overflow-y: auto;
+        }
+        .modal-header {
+            padding: var(--space-lg); border-bottom: 1px solid var(--ink);
+            display: flex; justify-content: space-between; align-items: center;
+        }
+        .modal-header h3 { font-family: 'Sora', sans-serif; font-size: 16px; font-weight: 600; }
+        .modal-close {
+            background: none; border: none; font-size: 20px; cursor: pointer; color: var(--ink-muted);
+        }
+        .modal-body { padding: var(--space-lg); }
+        .modal-footer { padding: var(--space-lg); border-top: 1px solid var(--border); }
+
+        /* Timezone */
+        .timezone-display {
+            font-family: 'Space Mono', monospace; font-size: 12px;
+            padding: var(--space-md); background: var(--paper); border: 1px solid var(--border);
+            margin-bottom: var(--space-lg);
+        }
+        .timezone-label { font-size: 10px; text-transform: uppercase; color: var(--ink-muted); margin-bottom: 4px; }
+        .timezone-value { color: var(--teal); font-weight: 700; }
+
+        /* Empty state */
+        .empty-state { text-align: center; padding: var(--space-xl); color: var(--ink-muted); font-size: 12px; }
+
+        /* Spinner */
         .spinner {
-            display: none;
-            border: 2px solid var(--border);
-            border-top: 2px solid var(--teal);
-            width: 24px;
-            height: 24px;
-            animation: spin 0.8s linear infinite;
-            margin: var(--space-lg) auto;
+            display: none; border: 2px solid var(--border); border-top: 2px solid var(--teal);
+            width: 24px; height: 24px; animation: spin 0.8s linear infinite; margin: var(--space-lg) auto;
         }
+        .spinner.show { display: block; }
+        @keyframes spin { 0% { transform: rotate(0deg); } 100% { transform: rotate(360deg); } }
 
-        .spinner.show {
-            display: block;
-        }
-
-        @keyframes spin {
-            0% { transform: rotate(0deg); }
-            100% { transform: rotate(360deg); }
-        }
-
-        .empty-state {
-            text-align: center;
-            padding: var(--space-xl);
-            color: var(--ink-muted);
-            font-size: 12px;
-        }
-
-        /* ========================================
-           RESPONSIVE
-           ======================================== */
+        /* Responsive */
         @media (max-width: 500px) {
-            body {
-                padding: var(--space-md);
-                align-items: flex-start;
-            }
-
-            .container::before,
-            .container::after {
-                display: none;
-            }
+            body { padding: var(--space-sm); }
+            .container::before, .container::after { display: none; }
+            .header { flex-direction: column; text-align: center; padding: var(--space-lg); }
+            .header-label::before { display: none; }
+            .tab { font-size: 9px; padding: var(--space-sm); }
+            .day-picker { flex-wrap: wrap; }
         }
     </style>
 </head>
 <body>
     <div class="container">
         <div class="header">
-            <div class="header-label">Device Setup</div>
-            <h1>Ossuary</h1>
-            <p>Configure WiFi and startup commands</p>
+            <svg class="header-logo" viewBox="0 0 100 100" xmlns="http://www.w3.org/2000/svg">
+                <defs><clipPath id="canvasClip"><rect x="0" y="0" width="50" height="100"/><rect x="50" y="50" width="50" height="50"/></clipPath></defs>
+                <rect x="0" y="0" width="100" height="100" fill="#000"/>
+                <rect x="0" y="0" width="50" height="100" fill="#fff"/>
+                <rect x="50" y="50" width="50" height="50" fill="#fff"/>
+                <polygon points="0,0 50,50 0,100" fill="#8ED3EF" clip-path="url(#canvasClip)"/>
+            </svg>
+            <div class="header-content">
+                <div class="header-label">Kiosk Setup</div>
+                <h1>Ossuary</h1>
+                <p>Configure your display</p>
+            </div>
         </div>
 
         <div class="tab-container">
             <button class="tab active" onclick="switchTab('wifi')">WiFi</button>
-            <button class="tab" onclick="switchTab('startup')">Startup</button>
+            <button class="tab" onclick="switchTab('networks')">Networks</button>
+            <button class="tab" onclick="switchTab('display')">Display</button>
+            <button class="tab" onclick="switchTab('schedule')">Schedule</button>
         </div>
 
         <!-- WiFi Tab -->
         <div id="wifi-tab" class="tab-content active">
-            <div id="message" class="message"></div>
+            <div id="wifi-message" class="message"></div>
 
             <div class="input-group">
-                <label>Available Networks</label>
-                <div class="network-list" id="networks">
+                <label>Nearby Networks</label>
+                <div class="network-list" id="nearby-networks">
                     <div class="spinner show"></div>
                 </div>
             </div>
 
             <div class="input-group">
-                <label for="manual-ssid">Manual Network Name</label>
-                <input type="text" id="manual-ssid" name="ssid"
-                       autocomplete="username" autocapitalize="none"
-                       autocorrect="off" spellcheck="false"
-                       placeholder="Enter SSID if not listed above">
+                <label for="wifi-ssid">Network Name</label>
+                <input type="text" id="wifi-ssid" placeholder="Enter SSID manually">
             </div>
 
             <div class="input-group">
-                <label for="password">Password</label>
-                <input type="password" id="password" name="password"
-                       autocomplete="current-password"
-                       placeholder="Leave empty for open networks">
+                <label for="wifi-password">Password</label>
+                <input type="password" id="wifi-password" placeholder="Leave empty for open networks">
             </div>
 
-            <button class="btn-primary" onclick="connectWiFi()" id="connect-btn">Connect</button>
-            <button class="btn-secondary" onclick="loadNetworks()">Refresh Networks</button>
+            <button class="btn-primary" onclick="connectWiFi()" id="wifi-connect-btn">Connect</button>
+            <button class="btn-secondary" onclick="loadNearbyNetworks()">Refresh Networks</button>
 
             <div class="info-box">
-                <h3>Status</h3>
-                <p id="status">Scanning for networks...</p>
+                <h3>After Connecting</h3>
+                <p>Access config at: <code id="config-url">http://loading...</code></p>
             </div>
         </div>
 
-        <!-- Startup Tab -->
-        <div id="startup-tab" class="tab-content">
-            <div class="input-group">
-                <label for="startup-cmd">Startup Command</label>
-                <textarea id="startup-cmd" placeholder="DISPLAY=:0 chromium --kiosk --noerrdialogs https://example.com/my-canvas"></textarea>
-            </div>
+        <!-- Saved Networks Tab -->
+        <div id="networks-tab" class="tab-content">
+            <p class="section-label">Saved Networks</p>
+            <div id="saved-networks-list"></div>
 
-            <button class="btn-primary" onclick="saveStartupCommand()">Save Command</button>
+            <button class="btn-primary" onclick="showAddNetworkModal()">Add Network</button>
 
             <div class="info-box">
-                <h3>About</h3>
-                <p>This command runs automatically when your device boots with network connectivity. Use full paths to executables.</p>
+                <h3>Pre-configure Networks</h3>
+                <p>Add networks before arriving at a venue. The device will auto-connect when in range.</p>
+            </div>
+        </div>
+
+        <!-- Display Tab -->
+        <div id="display-tab" class="tab-content">
+            <div id="preset-view">
+                <p class="section-label">What will this kiosk display?</p>
+                <div class="preset-grid">
+                    <div class="preset-card lumencanvas" onclick="selectPreset('lumencanvas')">
+                        <div class="preset-icon">
+                            <svg viewBox="0 0 100 100" xmlns="http://www.w3.org/2000/svg">
+                                <rect x="0" y="0" width="100" height="100" fill="#000"/>
+                                <rect x="0" y="0" width="50" height="100" fill="#fff"/>
+                                <rect x="50" y="50" width="50" height="50" fill="#fff"/>
+                                <polygon points="0,0 50,50 0,100" fill="#8ED3EF"/>
+                            </svg>
+                        </div>
+                        <div class="preset-content">
+                            <div class="preset-name">LumenCanvas</div>
+                            <div class="preset-desc">Display a LumenCanvas project</div>
+                            <div class="preset-tags">
+                                <span class="preset-tag">WebGPU</span>
+                                <span class="preset-tag">Kiosk</span>
+                            </div>
+                        </div>
+                    </div>
+
+                    <div class="preset-card" onclick="selectPreset('webgpu')">
+                        <div class="preset-icon">&#127760;</div>
+                        <div class="preset-content">
+                            <div class="preset-name">Web Kiosk</div>
+                            <div class="preset-desc">Any URL in fullscreen</div>
+                            <div class="preset-tags"><span class="preset-tag">WebGPU</span></div>
+                        </div>
+                    </div>
+
+                    <div class="preset-card" onclick="selectPreset('custom')">
+                        <div class="preset-icon">&#9000;</div>
+                        <div class="preset-content">
+                            <div class="preset-name">Custom Command</div>
+                            <div class="preset-desc">Run any shell command</div>
+                            <div class="preset-tags"><span class="preset-tag">Advanced</span></div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <div id="lumencanvas-config" class="config-panel">
+                <span class="back-link" onclick="showPresetView()">&larr; Back</span>
+                <h4>LumenCanvas Configuration</h4>
+                <div class="input-group">
+                    <label for="lc-url">Canvas URL or ID</label>
+                    <input type="text" id="lc-url" placeholder="https://lumencanvas.studio/canvas/abc123">
+                </div>
+                <p class="section-label">Display Options</p>
+                <div class="checkbox-group">
+                    <div class="checkbox-item"><input type="checkbox" id="lc-kiosk" checked><label for="lc-kiosk">Kiosk mode</label></div>
+                    <div class="checkbox-item"><input type="checkbox" id="lc-webgpu" checked><label for="lc-webgpu">WebGPU acceleration</label></div>
+                    <div class="checkbox-item"><input type="checkbox" id="lc-autoplay" checked><label for="lc-autoplay">Auto-play media</label></div>
+                </div>
+                <button class="btn-primary" onclick="saveLumenCanvasConfig()">Save & Apply</button>
+            </div>
+
+            <div id="webgpu-config" class="config-panel">
+                <span class="back-link" onclick="showPresetView()">&larr; Back</span>
+                <h4>Web Kiosk Configuration</h4>
+                <div class="input-group">
+                    <label for="web-url">Website URL</label>
+                    <input type="text" id="web-url" placeholder="https://example.com">
+                </div>
+                <div class="checkbox-group">
+                    <div class="checkbox-item"><input type="checkbox" id="web-kiosk" checked><label for="web-kiosk">Kiosk mode</label></div>
+                    <div class="checkbox-item"><input type="checkbox" id="web-webgpu" checked><label for="web-webgpu">WebGPU acceleration</label></div>
+                </div>
+                <button class="btn-primary" onclick="saveWebKioskConfig()">Save & Apply</button>
+            </div>
+
+            <div id="custom-config" class="config-panel">
+                <span class="back-link" onclick="showPresetView()">&larr; Back</span>
+                <h4>Custom Command</h4>
+                <div class="input-group">
+                    <label for="startup-cmd">Startup Command</label>
+                    <textarea id="startup-cmd" placeholder="DISPLAY=:0 chromium --kiosk https://example.com"></textarea>
+                </div>
+                <button class="btn-primary" onclick="saveCustomCommand()">Save & Apply</button>
+            </div>
+        </div>
+
+        <!-- Schedule Tab -->
+        <div id="schedule-tab" class="tab-content">
+            <div class="timezone-display">
+                <div class="timezone-label">Timezone</div>
+                <div class="timezone-value" id="current-timezone">Loading...</div>
+                <button class="btn-small" style="margin-top: 8px;" onclick="showTimezoneModal()">Change</button>
+            </div>
+
+            <div class="checkbox-item" style="margin-bottom: var(--space-lg);">
+                <input type="checkbox" id="schedule-enabled" onchange="toggleSchedule()">
+                <label for="schedule-enabled">Enable scheduling</label>
+            </div>
+
+            <p class="section-label">Schedule Rules</p>
+            <div id="schedule-list" class="schedule-list">
+                <div class="empty-state">No schedule rules yet</div>
+            </div>
+
+            <button class="btn-primary" onclick="showAddScheduleModal()">Add Schedule Rule</button>
+
+            <div class="info-box">
+                <h3>How Scheduling Works</h3>
+                <p>Create rules to switch displays or refresh at specific times. Great for galleries, signage, and scheduled content.</p>
+            </div>
+        </div>
+    </div>
+
+    <!-- Add Network Modal -->
+    <div class="modal-overlay" id="add-network-modal">
+        <div class="modal">
+            <div class="modal-header">
+                <h3>Add Network</h3>
+                <button class="modal-close" onclick="hideModal('add-network-modal')">&times;</button>
+            </div>
+            <div class="modal-body">
+                <div class="input-group">
+                    <label for="new-network-ssid">Network Name (SSID)</label>
+                    <input type="text" id="new-network-ssid" placeholder="MyWiFiNetwork">
+                </div>
+                <div class="input-group">
+                    <label for="new-network-password">Password</label>
+                    <input type="password" id="new-network-password" placeholder="Leave empty for open networks">
+                </div>
+                <div class="input-group">
+                    <label for="new-network-notes">Notes (optional)</label>
+                    <input type="text" id="new-network-notes" placeholder="e.g., Gallery main office">
+                </div>
+            </div>
+            <div class="modal-footer">
+                <button class="btn-primary" onclick="saveNewNetwork()">Save Network</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- Add Schedule Modal -->
+    <div class="modal-overlay" id="add-schedule-modal">
+        <div class="modal">
+            <div class="modal-header">
+                <h3>Add Schedule Rule</h3>
+                <button class="modal-close" onclick="hideModal('add-schedule-modal')">&times;</button>
+            </div>
+            <div class="modal-body">
+                <div class="input-group">
+                    <label for="schedule-name">Rule Name</label>
+                    <input type="text" id="schedule-name" placeholder="Morning Display">
+                </div>
+                <div class="input-group">
+                    <label>Start Time</label>
+                    <input type="time" id="schedule-start-time" value="08:00">
+                </div>
+                <div class="input-group">
+                    <label>Days</label>
+                    <div class="day-picker" id="schedule-days">
+                        <button class="day-btn" data-day="mon" onclick="toggleDay(this)">Mon</button>
+                        <button class="day-btn" data-day="tue" onclick="toggleDay(this)">Tue</button>
+                        <button class="day-btn" data-day="wed" onclick="toggleDay(this)">Wed</button>
+                        <button class="day-btn" data-day="thu" onclick="toggleDay(this)">Thu</button>
+                        <button class="day-btn" data-day="fri" onclick="toggleDay(this)">Fri</button>
+                        <button class="day-btn" data-day="sat" onclick="toggleDay(this)">Sat</button>
+                        <button class="day-btn" data-day="sun" onclick="toggleDay(this)">Sun</button>
+                    </div>
+                </div>
+                <div class="input-group">
+                    <label for="schedule-action">Action</label>
+                    <select id="schedule-action">
+                        <option value="refresh">Refresh page</option>
+                        <option value="switch_lumencanvas">Switch to LumenCanvas</option>
+                        <option value="switch_webgpu">Switch to Web Kiosk</option>
+                        <option value="switch_custom">Switch to Custom Command</option>
+                        <option value="restart">Restart process</option>
+                    </select>
+                </div>
+                <div class="input-group" id="schedule-until-group">
+                    <label>End Time (optional)</label>
+                    <input type="time" id="schedule-end-time" placeholder="Leave empty if no end">
+                </div>
+            </div>
+            <div class="modal-footer">
+                <button class="btn-primary" onclick="saveScheduleRule()">Add Rule</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- Timezone Modal -->
+    <div class="modal-overlay" id="timezone-modal">
+        <div class="modal">
+            <div class="modal-header">
+                <h3>Set Timezone</h3>
+                <button class="modal-close" onclick="hideModal('timezone-modal')">&times;</button>
+            </div>
+            <div class="modal-body">
+                <div class="input-group">
+                    <label for="timezone-select">Timezone</label>
+                    <select id="timezone-select">
+                        <option value="auto">Auto-detect</option>
+                    </select>
+                </div>
+            </div>
+            <div class="modal-footer">
+                <button class="btn-primary" onclick="saveTimezone()">Save</button>
             </div>
         </div>
     </div>
 
     <script>
         let selectedNetwork = null;
-        let isConnecting = false;
-        let inputPollingInterval = null;
-        let lastInputValues = { ssid: '', password: '' };
+        let systemHostname = 'ossuary';
+        let scheduleRules = [];
+        let savedNetworks = [];
 
-        // Robust input value tracking for iOS Safari autofill
-        function setupInputTracking() {
-            const ssidInput = document.getElementById('manual-ssid');
-            const passwordInput = document.getElementById('password');
-
-            const events = ['input', 'change', 'keyup', 'paste', 'blur', 'focus'];
-
-            events.forEach(eventType => {
-                ssidInput.addEventListener(eventType, handleSSIDChange);
-                passwordInput.addEventListener(eventType, handlePasswordChange);
-            });
-
-            ssidInput.addEventListener('animationstart', handleAutofillAnimation);
-            passwordInput.addEventListener('animationstart', handleAutofillAnimation);
-
-            startInputPolling();
+        // Initialize
+        async function init() {
+            loadNearbyNetworks();
+            loadSavedNetworks();
+            loadSchedule();
+            loadTimezone();
+            fetchSystemInfo();
+            setInterval(loadNearbyNetworks, 15000);
         }
 
-        function handleAutofillAnimation(e) {
-            if (e.animationName === 'onAutoFillStart') {
-                setTimeout(() => syncInputValues(), 50);
-            }
-        }
-
-        function handleSSIDChange(e) {
-            updateSSIDState(e.target.value.trim());
-        }
-
-        function handlePasswordChange(e) {
-            updatePasswordVisualState(e.target.value);
-        }
-
-        function updateSSIDState(value) {
-            const ssidInput = document.getElementById('manual-ssid');
-
-            if (value) {
-                document.querySelectorAll('.network-item').forEach(item =>
-                    item.classList.remove('selected')
-                );
-                selectedNetwork = null;
-                document.getElementById('connect-btn').textContent = `Connect to ${value}`;
-                ssidInput.classList.add('has-value');
-            } else {
-                ssidInput.classList.remove('has-value');
-                if (!selectedNetwork) {
-                    document.getElementById('connect-btn').textContent = 'Connect';
+        async function fetchSystemInfo() {
+            try {
+                const response = await fetch('/api/system/info');
+                if (response.ok) {
+                    const info = await response.json();
+                    systemHostname = info.hostname || 'ossuary';
+                    document.getElementById('config-url').textContent = info.config_url || `http://${systemHostname}.local:8080`;
                 }
+            } catch (e) {
+                document.getElementById('config-url').textContent = `http://${window.location.hostname}:8080`;
             }
         }
 
-        function updatePasswordVisualState(value) {
-            const passwordInput = document.getElementById('password');
-            if (value) {
-                passwordInput.classList.add('has-value');
-            } else {
-                passwordInput.classList.remove('has-value');
-            }
-        }
-
-        function syncInputValues() {
-            const ssidInput = document.getElementById('manual-ssid');
-            const passwordInput = document.getElementById('password');
-
-            const currentSSID = ssidInput.value.trim();
-            const currentPassword = passwordInput.value;
-
-            if (currentSSID !== lastInputValues.ssid) {
-                lastInputValues.ssid = currentSSID;
-                updateSSIDState(currentSSID);
-            }
-
-            if (currentPassword !== lastInputValues.password) {
-                lastInputValues.password = currentPassword;
-                updatePasswordVisualState(currentPassword);
-            }
-        }
-
-        function startInputPolling() {
-            if (inputPollingInterval) {
-                clearInterval(inputPollingInterval);
-            }
-            inputPollingInterval = setInterval(syncInputValues, 500);
-        }
-
-        async function getCredentials() {
-            const ssidInput = document.getElementById('manual-ssid');
-            const passwordInput = document.getElementById('password');
-
-            ssidInput.blur();
-            passwordInput.blur();
-
-            await new Promise(resolve => setTimeout(resolve, 50));
-
-            const manualSSID = ssidInput.value.trim();
-            const password = passwordInput.value;
-            const ssid = manualSSID || selectedNetwork || '';
-
-            return {
-                ssid: ssid,
-                password: password,
-                source: manualSSID ? 'manual' : (selectedNetwork ? 'selected' : 'none')
-            };
-        }
-
-        function validateCredentials(creds) {
-            const ssidInput = document.getElementById('manual-ssid');
-
-            if (!creds.ssid) {
-                if (creds.source === 'none') {
-                    ssidInput.classList.add('invalid');
-                    ssidInput.classList.remove('valid');
-                }
-                return { valid: false, error: 'Please select a network or enter SSID manually' };
-            }
-
-            if (creds.ssid.length > 32) {
-                ssidInput.classList.add('invalid');
-                ssidInput.classList.remove('valid');
-                return { valid: false, error: 'SSID must be 32 characters or less' };
-            }
-
-            if (creds.source === 'manual') {
-                ssidInput.classList.add('valid');
-                ssidInput.classList.remove('invalid');
-            }
-            return { valid: true };
-        }
-
-        const ConnectionState = {
-            IDLE: 'idle',
-            CONNECTING: 'connecting',
-            WAITING: 'waiting',
-            SUCCESS: 'success',
-            FAILED: 'failed'
-        };
-
-        let connectionState = ConnectionState.IDLE;
-        let connectionAttempts = 0;
-        const MAX_RETRY_ATTEMPTS = 2;
-
-        function mapErrorMessage(errorText, statusCode) {
-            const errorMappings = {
-                'invalid passphrase': 'Incorrect password. Please check and try again.',
-                'psk': 'Incorrect password. WPA/WPA2 networks require 8-63 characters.',
-                'not found': 'Network not found. It may be out of range or hidden.',
-                'timeout': 'Connection timed out. The network may be too far away.',
-                'association': 'Could not connect. Network may be at capacity.',
-                'authentication': 'Authentication failed. Please check your password.',
-                'dhcp': 'Connected but could not get IP address. Try again.',
-                'busy': 'WiFi adapter is busy. Please wait and try again.',
-                '400': 'Invalid request. Check your network name and password.',
-                '401': 'Authentication required. Enter the correct password.',
-                '403': 'Access denied. The network may be blocking this device.',
-                '404': 'Network not found. Try entering the name manually.',
-                '500': 'Server error. Please restart the setup.',
-                '502': 'Backend unavailable. Please wait and try again.',
-                '503': 'Service unavailable. Please try again shortly.',
-            };
-
-            const lowerError = (errorText || '').toLowerCase();
-            for (const [pattern, message] of Object.entries(errorMappings)) {
-                if (lowerError.includes(pattern) || String(statusCode) === pattern) {
-                    return message;
-                }
-            }
-
-            if (statusCode >= 500) return 'Server error occurred. Please try again.';
-            if (statusCode >= 400) return 'Connection failed. Check your credentials.';
-            return errorText || 'An unexpected error occurred.';
-        }
-
-        async function retryConnection(creds, attempt) {
-            const delay = Math.min(1000 * Math.pow(2, attempt), 5000);
-            await new Promise(resolve => setTimeout(resolve, delay));
-            return await attemptConnection(creds);
-        }
-
-        async function attemptConnection(creds) {
-            const response = await fetch('/connect', {
-                method: 'POST',
-                headers: {'Content-Type': 'application/json'},
-                body: JSON.stringify({
-                    ssid: creds.ssid,
-                    passphrase: creds.password || '',
-                    identity: ''
-                })
-            });
-
-            return {
-                ok: response.ok,
-                status: response.status,
-                text: await response.text()
-            };
-        }
-
+        // Tab switching
         function switchTab(tab) {
             document.querySelectorAll('.tab').forEach(t => t.classList.remove('active'));
             document.querySelectorAll('.tab-content').forEach(c => c.classList.remove('active'));
 
-            if (tab === 'wifi') {
-                document.querySelectorAll('.tab')[0].classList.add('active');
-                document.getElementById('wifi-tab').classList.add('active');
-            } else {
-                document.querySelectorAll('.tab')[1].classList.add('active');
-                document.getElementById('startup-tab').classList.add('active');
-                loadStartupCommand();
-            }
+            const tabMap = { wifi: 0, networks: 1, display: 2, schedule: 3 };
+            document.querySelectorAll('.tab')[tabMap[tab]].classList.add('active');
+            document.getElementById(`${tab}-tab`).classList.add('active');
+
+            if (tab === 'networks') loadSavedNetworks();
+            if (tab === 'schedule') loadSchedule();
         }
 
-        function showMessage(text, type) {
-            const msg = document.getElementById('message');
-            msg.textContent = text;
-            msg.className = `message ${type} show`;
-            setTimeout(() => msg.classList.remove('show'), 5000);
+        function showMessage(id, text, type) {
+            const msg = document.getElementById(id);
+            if (msg) { msg.textContent = text; msg.className = `message ${type} show`; setTimeout(() => msg.classList.remove('show'), 5000); }
         }
 
-        async function loadNetworks() {
+        // Modal helpers
+        function showModal(id) { document.getElementById(id).classList.add('show'); }
+        function hideModal(id) { document.getElementById(id).classList.remove('show'); }
+        function showAddNetworkModal() { showModal('add-network-modal'); }
+        function showAddScheduleModal() { showModal('add-schedule-modal'); }
+        function showTimezoneModal() { showModal('timezone-modal'); }
+
+        // WiFi functions
+        async function loadNearbyNetworks() {
             try {
                 const response = await fetch('/networks');
-
-                if (!response.ok) {
-                    throw new Error(`HTTP error: ${response.status}`);
-                }
-
                 const networks = await response.json();
-                const container = document.getElementById('networks');
+                const container = document.getElementById('nearby-networks');
                 container.innerHTML = '';
 
                 if (!networks || networks.length === 0) {
-                    container.innerHTML = '<div class="empty-state">No networks found. Enter name manually below.</div>';
-                    document.getElementById('status').textContent = 'No networks detected';
+                    container.innerHTML = '<div class="empty-state">No networks found</div>';
                     return;
                 }
 
                 networks.sort((a, b) => (b.signal || 0) - (a.signal || 0));
-
                 networks.forEach(network => {
+                    const ssid = network.ssid || network.SSID || 'Unknown';
+                    const signal = network.signal || 0;
                     const item = document.createElement('div');
                     item.className = 'network-item';
-
-                    const ssid = network.ssid || network.SSID || 'Unknown';
-                    const signal = network.signal || network.Signal || network.strength || 0;
-                    const encrypted = network.encrypted !== undefined ? network.encrypted :
-                                    network.security !== undefined ? (network.security !== 'Open') : true;
-
-                    // Build DOM elements safely to prevent XSS from malicious SSIDs
-                    const infoDiv = document.createElement('div');
-                    const nameDiv = document.createElement('div');
-                    nameDiv.className = 'network-name';
-                    nameDiv.textContent = ssid;  // Safe: textContent escapes HTML
-                    const metaDiv = document.createElement('div');
-                    metaDiv.className = 'network-meta';
-                    metaDiv.textContent = `${signal}% signal`;
-                    infoDiv.appendChild(nameDiv);
-                    infoDiv.appendChild(metaDiv);
-
-                    const iconDiv = document.createElement('div');
-                    iconDiv.className = 'network-icon';
-                    iconDiv.innerHTML = encrypted ? '&#128274;' : '&#128246;';
-
-                    item.appendChild(infoDiv);
-                    item.appendChild(iconDiv);
-                    item.onclick = () => selectNetwork(ssid, item);
+                    item.innerHTML = `<div><div class="network-name">${ssid}</div><div class="network-meta">${signal}% signal</div></div><div>${network.encrypted !== false ? '&#128274;' : '&#128246;'}</div>`;
+                    item.onclick = () => selectWifiNetwork(ssid, item);
                     container.appendChild(item);
                 });
-
-                document.getElementById('status').textContent = `Found ${networks.length} network${networks.length !== 1 ? 's' : ''}`;
-            } catch (error) {
-                const container = document.getElementById('networks');
-                container.innerHTML = '';
-                const errorDiv = document.createElement('div');
-                errorDiv.className = 'empty-state';
-                errorDiv.style.color = 'var(--error)';
-                errorDiv.textContent = `Error: ${error.message}`;  // Safe: textContent escapes
-                container.appendChild(errorDiv);
-                document.getElementById('status').textContent = 'Error scanning networks';
+            } catch (e) {
+                document.getElementById('nearby-networks').innerHTML = '<div class="empty-state">Error loading networks</div>';
             }
         }
 
-        function selectNetwork(ssid, element) {
-            document.querySelectorAll('.network-item').forEach(item =>
-                item.classList.remove('selected')
-            );
+        function selectWifiNetwork(ssid, element) {
+            document.querySelectorAll('#nearby-networks .network-item').forEach(i => i.classList.remove('selected'));
             element.classList.add('selected');
             selectedNetwork = ssid;
-            document.getElementById('connect-btn').textContent = `Connect to ${ssid}`;
-            document.getElementById('manual-ssid').value = '';
-            document.getElementById('manual-ssid').classList.remove('has-value', 'valid', 'invalid');
+            document.getElementById('wifi-ssid').value = ssid;
+            document.getElementById('wifi-connect-btn').textContent = `Connect to ${ssid}`;
         }
 
         async function connectWiFi() {
-            if (isConnecting) return;
+            const ssid = document.getElementById('wifi-ssid').value.trim() || selectedNetwork;
+            const password = document.getElementById('wifi-password').value;
 
-            const creds = await getCredentials();
+            if (!ssid) { showMessage('wifi-message', 'Please select or enter a network', 'error'); return; }
 
-            const validation = validateCredentials(creds);
-            if (!validation.valid) {
-                showMessage(validation.error, 'error');
+            const btn = document.getElementById('wifi-connect-btn');
+            btn.disabled = true; btn.textContent = 'Connecting...';
+
+            try {
+                const response = await fetch('/connect', {
+                    method: 'POST',
+                    headers: {'Content-Type': 'application/json'},
+                    body: JSON.stringify({ ssid, passphrase: password || '', identity: '' })
+                });
+                if (response.ok) {
+                    showMessage('wifi-message', 'Connecting...', 'success');
+                    // Also save to our list
+                    await saveNetworkToList(ssid, password, '');
+                } else {
+                    showMessage('wifi-message', 'Connection failed', 'error');
+                }
+            } catch (e) {
+                showMessage('wifi-message', e.message, 'error');
+            } finally {
+                btn.disabled = false; btn.textContent = 'Connect';
+            }
+        }
+
+        // Saved networks
+        async function loadSavedNetworks() {
+            try {
+                const response = await fetch('/api/saved-networks');
+                const data = await response.json();
+                savedNetworks = data.saved_networks || [];
+                renderSavedNetworks();
+            } catch (e) {
+                savedNetworks = [];
+                renderSavedNetworks();
+            }
+        }
+
+        function renderSavedNetworks() {
+            const container = document.getElementById('saved-networks-list');
+            if (!savedNetworks.length) {
+                container.innerHTML = '<div class="empty-state">No saved networks</div>';
                 return;
             }
 
-            isConnecting = true;
-
-            const btn = document.getElementById('connect-btn');
-            const originalText = btn.textContent;
-            btn.disabled = true;
-            btn.textContent = 'Connecting...';
-
-            try {
-                connectionState = ConnectionState.CONNECTING;
-                connectionAttempts = 0;
-
-                let result = await attemptConnection(creds);
-                connectionAttempts++;
-
-                while (!result.ok && result.status >= 500 && connectionAttempts < MAX_RETRY_ATTEMPTS) {
-                    btn.textContent = `Retrying... (${connectionAttempts}/${MAX_RETRY_ATTEMPTS})`;
-                    result = await retryConnection(creds, connectionAttempts);
-                    connectionAttempts++;
-                }
-
-                if (result.ok) {
-                    connectionState = ConnectionState.SUCCESS;
-                    showMessage('Connecting to network...', 'success');
-                    document.getElementById('status').textContent = 'Connection initiated. Please wait...';
-
-                    const startupCmd = document.getElementById('startup-cmd').value;
-                    if (startupCmd) {
-                        localStorage.setItem('startup_command', startupCmd);
-                    }
-
-                    setTimeout(() => {
-                        document.getElementById('status').textContent = 'Device connecting. You may need to reconnect.';
-                        showMessage('If successful, the setup network will disappear.', 'success');
-                    }, 3000);
-
-                    setTimeout(() => {
-                        connectionState = ConnectionState.WAITING;
-                        document.getElementById('status').textContent = 'Connection complete. If AP visible, connection may have failed.';
-                    }, 10000);
-                } else {
-                    connectionState = ConnectionState.FAILED;
-                    const friendlyError = mapErrorMessage(result.text, result.status);
-                    showMessage(friendlyError, 'error');
-                    document.getElementById('status').textContent = friendlyError;
-                }
-            } catch (error) {
-                connectionState = ConnectionState.FAILED;
-                const friendlyError = mapErrorMessage(error.message, 0);
-                showMessage(friendlyError, 'error');
-                document.getElementById('status').textContent = friendlyError;
-            } finally {
-                btn.disabled = false;
-                btn.textContent = originalText;
-                isConnecting = false;
-                if (connectionState !== ConnectionState.SUCCESS && connectionState !== ConnectionState.WAITING) {
-                    connectionState = ConnectionState.IDLE;
-                }
-            }
+            container.innerHTML = savedNetworks.map(n => `
+                <div class="saved-network-item">
+                    <div class="saved-network-info">
+                        <div class="saved-network-ssid">${n.ssid}</div>
+                        ${n.notes ? `<div class="saved-network-notes">${n.notes}</div>` : ''}
+                        <div class="saved-network-meta">${n.last_connected ? 'Last: ' + new Date(n.last_connected).toLocaleDateString() : 'Never connected'}</div>
+                    </div>
+                    <div class="network-actions">
+                        <button class="btn-small" onclick="connectSavedNetwork('${n.ssid}')">Connect</button>
+                        <button class="btn-small danger" onclick="deleteNetwork('${n.ssid}')">Delete</button>
+                    </div>
+                </div>
+            `).join('');
         }
 
-        async function loadStartupCommand() {
+        async function saveNetworkToList(ssid, password, notes) {
             try {
-                const response = await fetch('/startup');
-                if (response.ok) {
-                    const data = await response.json();
-                    document.getElementById('startup-cmd').value = data.command || '';
-                }
-            } catch (error) {
-                const savedCmd = localStorage.getItem('startup_command');
-                if (savedCmd) {
-                    document.getElementById('startup-cmd').value = savedCmd;
-                }
-            }
-            checkSystemStatus();
-        }
-
-        async function saveStartupCommand() {
-            const command = document.getElementById('startup-cmd').value.trim();
-
-            try {
-                const response = await fetch('/startup', {
+                await fetch('/api/saved-networks', {
                     method: 'POST',
                     headers: {'Content-Type': 'application/json'},
-                    body: JSON.stringify({command: command})
+                    body: JSON.stringify({ ssid, password, notes, auto_connect: true })
                 });
-
-                if (response.ok) {
-                    showMessage('Startup command saved!', 'success');
-                    localStorage.setItem('startup_command', command);
-                } else {
-                    throw new Error('Failed to save');
-                }
-            } catch (error) {
-                localStorage.setItem('startup_command', command);
-                showMessage('Saved locally. Will apply after connection.', 'success');
-            }
+            } catch (e) {}
         }
 
-        async function checkSystemStatus() {
+        async function saveNewNetwork() {
+            const ssid = document.getElementById('new-network-ssid').value.trim();
+            const password = document.getElementById('new-network-password').value;
+            const notes = document.getElementById('new-network-notes').value.trim();
+
+            if (!ssid) { alert('Network name required'); return; }
+
             try {
-                const response = await fetch('/status');
-                if (response.ok) {
-                    const status = await response.json();
-                    if (status.wifi_connected) {
-                        const startupTab = document.getElementById('startup-tab');
-                        if (startupTab && !document.getElementById('system-status')) {
-                            const statusDiv = document.createElement('div');
-                            statusDiv.id = 'system-status';
-                            statusDiv.className = 'info-box success';
-                            statusDiv.style.marginBottom = 'var(--space-lg)';
-                            statusDiv.innerHTML = `
-                                <h3>Connected</h3>
-                                <p>WiFi: ${status.ssid}<br>Host: ${status.hostname}</p>
-                            `;
-                            startupTab.insertBefore(statusDiv, startupTab.firstChild);
-                        }
-                    }
-                }
-            } catch (error) {
-                // Ignore
+                await fetch('/api/saved-networks', {
+                    method: 'POST',
+                    headers: {'Content-Type': 'application/json'},
+                    body: JSON.stringify({ ssid, password, notes, auto_connect: true })
+                });
+                hideModal('add-network-modal');
+                document.getElementById('new-network-ssid').value = '';
+                document.getElementById('new-network-password').value = '';
+                document.getElementById('new-network-notes').value = '';
+                loadSavedNetworks();
+            } catch (e) {
+                alert('Failed to save network');
             }
         }
 
-        window.onload = () => {
-            setupInputTracking();
-            loadNetworks();
-            loadStartupCommand();
-            setInterval(loadNetworks, 10000);
-            setInterval(checkSystemStatus, 5000);
-        };
+        async function connectSavedNetwork(ssid) {
+            try {
+                const response = await fetch('/api/saved-networks/connect', {
+                    method: 'POST',
+                    headers: {'Content-Type': 'application/json'},
+                    body: JSON.stringify({ ssid })
+                });
+                if (response.ok) {
+                    alert('Connected to ' + ssid);
+                } else {
+                    alert('Failed to connect');
+                }
+            } catch (e) {
+                alert('Connection error');
+            }
+        }
+
+        async function deleteNetwork(ssid) {
+            if (!confirm(`Delete "${ssid}"?`)) return;
+            try {
+                await fetch('/api/saved-networks/delete', {
+                    method: 'POST',
+                    headers: {'Content-Type': 'application/json'},
+                    body: JSON.stringify({ ssid, remove_from_system: true })
+                });
+                loadSavedNetworks();
+            } catch (e) {}
+        }
+
+        // Display presets
+        function selectPreset(preset) {
+            document.getElementById('preset-view').style.display = 'none';
+            document.querySelectorAll('.config-panel').forEach(p => p.classList.remove('active'));
+            document.getElementById(`${preset}-config`).classList.add('active');
+        }
+
+        function showPresetView() {
+            document.querySelectorAll('.config-panel').forEach(p => p.classList.remove('active'));
+            document.getElementById('preset-view').style.display = 'block';
+        }
+
+        async function saveCommand(command) {
+            try {
+                await fetch('/startup', {
+                    method: 'POST',
+                    headers: {'Content-Type': 'application/json'},
+                    body: JSON.stringify({ command })
+                });
+                alert('Saved! Process will restart.');
+            } catch (e) {
+                localStorage.setItem('startup_command', command);
+                alert('Saved locally');
+            }
+        }
+
+        function buildLumenCanvasCommand() {
+            let url = document.getElementById('lc-url').value.trim();
+            if (url && !url.startsWith('http')) url = `https://lumencanvas.studio/canvas/${url}`;
+            if (!url) url = 'https://lumencanvas.studio';
+
+            let flags = ['--password-store=basic', '--disable-session-crashed-bubble', '--noerrdialogs', '--disable-infobars'];
+            if (document.getElementById('lc-kiosk').checked) flags.push('--kiosk');
+            if (document.getElementById('lc-webgpu').checked) flags.push('--enable-features=Vulkan,UseSkiaRenderer,WebGPU', '--enable-unsafe-webgpu', '--disable-gpu-sandbox');
+            if (document.getElementById('lc-autoplay').checked) flags.push('--autoplay-policy=no-user-gesture-required');
+
+            return `DISPLAY=:0 chromium ${flags.join(' ')} "${url}"`;
+        }
+
+        async function saveLumenCanvasConfig() { await saveCommand(buildLumenCanvasCommand()); }
+
+        function buildWebKioskCommand() {
+            const url = document.getElementById('web-url').value.trim() || 'https://example.com';
+            let flags = ['--password-store=basic', '--noerrdialogs', '--disable-infobars'];
+            if (document.getElementById('web-kiosk').checked) flags.push('--kiosk');
+            if (document.getElementById('web-webgpu').checked) flags.push('--enable-features=Vulkan,UseSkiaRenderer,WebGPU', '--enable-unsafe-webgpu', '--disable-gpu-sandbox');
+            return `DISPLAY=:0 chromium ${flags.join(' ')} "${url}"`;
+        }
+
+        async function saveWebKioskConfig() { await saveCommand(buildWebKioskCommand()); }
+        async function saveCustomCommand() { await saveCommand(document.getElementById('startup-cmd').value.trim()); }
+
+        // Schedule
+        async function loadSchedule() {
+            try {
+                const response = await fetch('/api/schedule');
+                const schedule = await response.json();
+                document.getElementById('schedule-enabled').checked = schedule.enabled || false;
+                scheduleRules = schedule.rules || [];
+                renderScheduleRules();
+            } catch (e) {
+                scheduleRules = [];
+                renderScheduleRules();
+            }
+        }
+
+        function renderScheduleRules() {
+            const container = document.getElementById('schedule-list');
+            if (!scheduleRules.length) {
+                container.innerHTML = '<div class="empty-state">No schedule rules yet</div>';
+                return;
+            }
+
+            const dayNames = { mon: 'Mo', tue: 'Tu', wed: 'We', thu: 'Th', fri: 'Fr', sat: 'Sa', sun: 'Su' };
+            const allDays = ['mon', 'tue', 'wed', 'thu', 'fri', 'sat', 'sun'];
+
+            container.innerHTML = scheduleRules.map((rule, idx) => `
+                <div class="schedule-item ${rule.enabled === false ? 'disabled' : ''}">
+                    <div class="schedule-info">
+                        <div class="schedule-name">${rule.name || 'Rule ' + (idx + 1)}</div>
+                        <div class="schedule-time">${rule.trigger?.time || '00:00'}${rule.until?.time ? ' - ' + rule.until.time : ''}</div>
+                        <div class="schedule-days">
+                            ${allDays.map(d => `<span class="schedule-day ${(rule.trigger?.days || []).includes(d) ? 'active' : ''}">${dayNames[d]}</span>`).join('')}
+                        </div>
+                        <div class="schedule-details">${rule.action?.type || 'refresh'}</div>
+                    </div>
+                    <div class="network-actions">
+                        <button class="btn-small danger" onclick="deleteScheduleRule(${idx})">Delete</button>
+                    </div>
+                </div>
+            `).join('');
+        }
+
+        function toggleDay(btn) {
+            btn.classList.toggle('selected');
+        }
+
+        async function toggleSchedule() {
+            const enabled = document.getElementById('schedule-enabled').checked;
+            try {
+                await fetch('/api/schedule', {
+                    method: 'POST',
+                    headers: {'Content-Type': 'application/json'},
+                    body: JSON.stringify({ enabled, rules: scheduleRules })
+                });
+            } catch (e) {}
+        }
+
+        async function saveScheduleRule() {
+            const name = document.getElementById('schedule-name').value.trim() || 'New Rule';
+            const startTime = document.getElementById('schedule-start-time').value;
+            const endTime = document.getElementById('schedule-end-time').value;
+            const action = document.getElementById('schedule-action').value;
+
+            const selectedDays = [];
+            document.querySelectorAll('#schedule-days .day-btn.selected').forEach(btn => {
+                selectedDays.push(btn.dataset.day);
+            });
+
+            if (selectedDays.length === 0) {
+                alert('Please select at least one day');
+                return;
+            }
+
+            const rule = {
+                id: 'rule-' + Date.now(),
+                name,
+                enabled: true,
+                trigger: { type: 'time', time: startTime, days: selectedDays },
+                action: { type: action.startsWith('switch_') ? 'switch_profile' : action, profile: action.replace('switch_', '') }
+            };
+
+            if (endTime) {
+                rule.until = { type: 'time', time: endTime };
+            }
+
+            scheduleRules.push(rule);
+
+            try {
+                await fetch('/api/schedule', {
+                    method: 'POST',
+                    headers: {'Content-Type': 'application/json'},
+                    body: JSON.stringify({ enabled: document.getElementById('schedule-enabled').checked, rules: scheduleRules })
+                });
+                hideModal('add-schedule-modal');
+                document.getElementById('schedule-name').value = '';
+                document.querySelectorAll('#schedule-days .day-btn').forEach(btn => btn.classList.remove('selected'));
+                renderScheduleRules();
+            } catch (e) {
+                alert('Failed to save rule');
+            }
+        }
+
+        async function deleteScheduleRule(idx) {
+            if (!confirm('Delete this rule?')) return;
+            scheduleRules.splice(idx, 1);
+            try {
+                await fetch('/api/schedule', {
+                    method: 'POST',
+                    headers: {'Content-Type': 'application/json'},
+                    body: JSON.stringify({ enabled: document.getElementById('schedule-enabled').checked, rules: scheduleRules })
+                });
+                renderScheduleRules();
+            } catch (e) {}
+        }
+
+        // Timezone
+        async function loadTimezone() {
+            try {
+                const response = await fetch('/api/timezone');
+                const data = await response.json();
+                document.getElementById('current-timezone').textContent = data.effective_timezone || 'Unknown';
+
+                const select = document.getElementById('timezone-select');
+                select.innerHTML = '<option value="auto">Auto-detect</option>';
+                (data.available_timezones || []).forEach(tz => {
+                    select.innerHTML += `<option value="${tz}">${tz}</option>`;
+                });
+                select.value = data.config_timezone || 'auto';
+            } catch (e) {
+                document.getElementById('current-timezone').textContent = 'Unknown';
+            }
+        }
+
+        async function saveTimezone() {
+            const timezone = document.getElementById('timezone-select').value;
+            try {
+                await fetch('/api/timezone', {
+                    method: 'POST',
+                    headers: {'Content-Type': 'application/json'},
+                    body: JSON.stringify({ timezone })
+                });
+                hideModal('timezone-modal');
+                loadTimezone();
+            } catch (e) {
+                alert('Failed to save timezone');
+            }
+        }
+
+        window.onload = init;
     </script>
 </body>
 </html>

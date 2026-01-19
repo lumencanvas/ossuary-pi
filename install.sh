@@ -61,21 +61,6 @@ success() {
     echo -e "${GREEN}✓${NC} $1"
 }
 
-# Show spinner for long operations
-show_spinner() {
-    local pid=$1
-    local delay=0.1
-    local spinstr='⠋⠙⠹⠸⠼⠴⠦⠧⠇⠏'
-    while [ "$(ps a | awk '{print $1}' | grep $pid)" ]; do
-        local temp=${spinstr#?}
-        printf " [%c]  " "$spinstr"
-        local spinstr=$temp${spinstr%"$temp"}
-        sleep $delay
-        printf "\b\b\b\b\b\b"
-    done
-    printf "    \b\b\b\b"
-}
-
 # Check if already installed
 check_existing_installation() {
     local is_installed=false
@@ -285,6 +270,15 @@ update_components() {
         success "Captive portal proxy installed"
     fi
 
+    # Install connection monitor script
+    if [ -f "$REPO_DIR/scripts/connection-monitor.sh" ]; then
+        cp "$REPO_DIR/scripts/connection-monitor.sh" "$INSTALL_DIR/scripts/"
+        chmod +x "$INSTALL_DIR/scripts/connection-monitor.sh"
+        success "Connection monitor script installed"
+    else
+        warning "Connection monitor script not found (optional)"
+    fi
+
     success "Scripts updated"
 }
 
@@ -341,14 +335,15 @@ EOF
     cat > /etc/systemd/system/ossuary-startup.service << EOF
 [Unit]
 Description=Ossuary Process Manager - Keeps User Command Running
-After=network-online.target multi-user.target NetworkManager.service
+After=multi-user.target NetworkManager.service
 Wants=network-online.target
 StartLimitIntervalSec=60
 StartLimitBurst=3
 
 [Service]
 Type=simple
-ExecStartPre=/bin/bash -c 'until ping -c1 8.8.8.8 &>/dev/null || ping -c1 1.1.1.1 &>/dev/null; do sleep 5; done'
+# Note: No ExecStartPre network wait - process-manager.sh handles this with timeout
+# This allows first-run welcome page to show even without network
 ExecStart=$INSTALL_DIR/process-manager.sh
 ExecReload=/bin/kill -HUP \$MAINPID
 ExecStop=/bin/kill -TERM \$MAINPID
@@ -411,6 +406,27 @@ StandardError=journal
 WantedBy=multi-user.target
 EOF
 
+    # Connection monitor service (handles refresh on connection events)
+    cat > /etc/systemd/system/ossuary-connection-monitor.service << EOF
+[Unit]
+Description=Ossuary Connection Monitor
+Documentation=https://github.com/lumencanvas/ossuary-pi
+After=network-online.target ossuary-startup.service
+Wants=network-online.target
+
+[Service]
+Type=simple
+ExecStart=/bin/bash $INSTALL_DIR/scripts/connection-monitor.sh
+Restart=always
+RestartSec=10
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=ossuary-connection
+
+[Install]
+WantedBy=multi-user.target
+EOF
+
     systemctl daemon-reload
     success "Services updated"
 }
@@ -435,11 +451,6 @@ perform_installation() {
         # But we include it to be safe for older versions
         apt-get install -y curl wget jq network-manager python3 python3-pip >> "$LOG_FILE" 2>&1
 
-        # Install Python packages if needed (for config server)
-        if ! python3 -c "import json" 2>/dev/null; then
-            apt-get install -y python3-json >> "$LOG_FILE" 2>&1
-        fi
-
         # NetworkManager is default in Pi OS Bookworm (2023) and Trixie (2025)
         # But we'll ensure it's enabled
         if ! systemctl is-active --quiet NetworkManager; then
@@ -454,6 +465,30 @@ perform_installation() {
         fi
 
         # Note: We don't touch dhcpcd anymore - it's deprecated and causes issues
+
+        # Configure auto-login for kiosk mode (desktop GUI without password)
+        log "Configuring auto-login..."
+        if command -v raspi-config &>/dev/null; then
+            # B4 = Desktop Autologin - Desktop GUI, automatically logged in as 'pi' user
+            raspi-config nonint do_boot_behaviour B4 >> "$LOG_FILE" 2>&1 || true
+            success "Auto-login configured (desktop mode)"
+        else
+            # Manual fallback for non-Raspberry Pi OS systems
+            if [ -f /etc/lightdm/lightdm.conf ]; then
+                # Find the default user
+                local autologin_user="pi"
+                if ! id "pi" &>/dev/null; then
+                    autologin_user=$(getent passwd | awk -F: '$3 >= 1000 && $3 < 65534 {print $1}' | head -1)
+                fi
+                if [ -n "$autologin_user" ]; then
+                    sed -i "s/^#autologin-user=.*/autologin-user=$autologin_user/" /etc/lightdm/lightdm.conf 2>/dev/null || true
+                    sed -i "s/^autologin-user=.*/autologin-user=$autologin_user/" /etc/lightdm/lightdm.conf 2>/dev/null || true
+                    success "Auto-login configured for user: $autologin_user"
+                fi
+            else
+                warning "Could not configure auto-login (lightdm not found)"
+            fi
+        fi
     fi
 
     # Step 2: Install/repair WiFi Connect
@@ -491,6 +526,11 @@ EOF
     systemctl enable ossuary-startup.service >> "$LOG_FILE" 2>&1
     systemctl enable ossuary-web.service >> "$LOG_FILE" 2>&1
 
+    # Enable connection monitor for refresh/restart behaviors
+    if [ -f /etc/systemd/system/ossuary-connection-monitor.service ]; then
+        systemctl enable ossuary-connection-monitor.service >> "$LOG_FILE" 2>&1
+    fi
+
     # Restart services (don't fail if services don't start immediately)
     log "Starting all services..."
 
@@ -510,6 +550,10 @@ EOF
     # Start startup command service (runs user's command at boot)
     log "Starting startup command service..."
     systemctl restart ossuary-startup 2>/dev/null || true  # This is oneshot, might not stay "active"
+
+    # Start connection monitor (handles refresh on connection events)
+    log "Starting connection monitor..."
+    systemctl restart ossuary-connection-monitor 2>/dev/null || true
 
     # Step 7: Copy uninstall and fix scripts
     cp "$REPO_DIR/uninstall.sh" "$INSTALL_DIR/" 2>/dev/null || true
@@ -557,7 +601,7 @@ run_ssh_safe() {
     echo ""
 
     nohup bash -c "
-        $(declare -f log error warning success backup_config restore_config install_wifi_connect update_components update_services perform_installation)
+        $(declare -f log debug error warning success backup_config restore_config install_wifi_connect update_components update_services perform_installation)
         REPO_DIR='$REPO_DIR'
         INSTALL_DIR='$INSTALL_DIR'
         CONFIG_DIR='$CONFIG_DIR'
@@ -718,7 +762,7 @@ main() {
             echo -e "${BLUE}After reboot:${NC}"
             echo "  • Look for 'Ossuary-Setup' WiFi network if no WiFi found"
             echo "  • Or SSH back in using the same IP address"
-            echo "  • Access config at http://$(hostname)"
+            echo "  • Access config at http://$(hostname).local:8080"
         else
             # Update/repair - lighter warning
             echo ""
@@ -807,9 +851,21 @@ main() {
                 fi
 
                 echo ""
-                echo "Access points:"
-                echo "  • Config page: http://$(hostname):8080 or http://$(hostname -I | awk '{print $1}'):8080"
-                echo "  • If no WiFi: Look for 'Ossuary-Setup' network"
+                DEVICE_HOSTNAME=$(hostname)
+                DEVICE_IP=$(hostname -I | awk '{print $1}')
+                echo ""
+                echo -e "${GREEN}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}"
+                echo -e "${GREEN}              ACCESS YOUR KIOSK                   ${NC}"
+                echo -e "${GREEN}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}"
+                echo ""
+                echo "When connected to your network:"
+                echo -e "  ${BLUE}http://${DEVICE_HOSTNAME}.local:8080${NC}"
+                echo "  http://${DEVICE_IP}:8080"
+                echo ""
+                echo "If no WiFi available:"
+                echo "  1. Connect to WiFi network: ${BLUE}Ossuary-Setup${NC}"
+                echo "  2. Open browser to configure WiFi + startup command"
+                echo "  3. After connecting, access config at the URLs above"
                 echo ""
                 echo -e "${BLUE}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}"
                 echo -e "${BLUE}         USEFUL COMMANDS TO REMEMBER              ${NC}"
@@ -876,10 +932,23 @@ main() {
                 echo "Update/repair complete. Services have been restarted."
             fi
 
+            DEVICE_HOSTNAME=$(hostname)
+            DEVICE_IP=$(hostname -I 2>/dev/null | awk '{print $1}')
             echo ""
-            echo "After reboot:"
-            echo "  • If no WiFi: Look for 'Ossuary-Setup' network"
-            echo "  • If connected: Access config at http://$(hostname):8080"
+            echo -e "${GREEN}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}"
+            echo -e "${GREEN}              ACCESS YOUR KIOSK                   ${NC}"
+            echo -e "${GREEN}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}"
+            echo ""
+            echo "After reboot, when connected to your network:"
+            echo -e "  ${BLUE}http://${DEVICE_HOSTNAME}.local:8080${NC}"
+            if [ -n "$DEVICE_IP" ]; then
+                echo "  http://${DEVICE_IP}:8080"
+            fi
+            echo ""
+            echo "If no WiFi available:"
+            echo "  1. Connect to WiFi network: ${BLUE}Ossuary-Setup${NC}"
+            echo "  2. Open browser to configure WiFi + startup"
+            echo "  3. After connecting, access config at the URLs above"
             echo ""
             echo -e "${BLUE}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}"
             echo -e "${BLUE}         COMMANDS REFERENCE (SAVE THIS!)          ${NC}"

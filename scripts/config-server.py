@@ -26,6 +26,100 @@ UI_DIR = "/opt/ossuary/custom-ui"
 LOG_DIR = "/var/log"
 TEST_PROCESSES = {}  # Track test processes
 
+# Default config schema v2
+DEFAULT_CONFIG = {
+    "version": 2,
+    "startup_command": "",
+    "active_profile": "custom",
+    "profiles": {
+        "lumencanvas": {
+            "type": "lumencanvas",
+            "name": "LumenCanvas Display",
+            "enabled": False,
+            "config": {
+                "canvas_url": "",
+                "flags": {
+                    "kiosk": True,
+                    "webgpu": True,
+                    "autoplay": True,
+                    "cursor": False
+                }
+            }
+        },
+        "webgpu_kiosk": {
+            "type": "webgpu_kiosk",
+            "name": "Web Kiosk",
+            "enabled": False,
+            "config": {
+                "url": "",
+                "flags": {
+                    "kiosk": True,
+                    "webgpu": True
+                }
+            }
+        },
+        "custom": {
+            "type": "custom",
+            "name": "Custom Command",
+            "enabled": True,
+            "config": {
+                "command": ""
+            }
+        }
+    },
+    "behaviors": {
+        "on_connection_lost": {
+            "action": "show_overlay",
+            "timeout_seconds": 60
+        },
+        "on_connection_regained": {
+            "action": "refresh_page",
+            "delay_seconds": 3
+        },
+        "scheduled_refresh": {
+            "enabled": False,
+            "interval_minutes": 60
+        }
+    },
+    "schedule": {
+        "enabled": False,
+        "timezone": "auto",  # "auto" or IANA timezone like "America/New_York"
+        "rules": [
+            # Example rule structure:
+            # {
+            #     "id": "rule-1",
+            #     "name": "Morning Display",
+            #     "enabled": True,
+            #     "trigger": {
+            #         "type": "time",  # "time", "interval", "connection"
+            #         "time": "08:00",
+            #         "days": ["mon", "tue", "wed", "thu", "fri"]
+            #     },
+            #     "action": {
+            #         "type": "switch_profile",  # "switch_profile", "refresh", "run_command"
+            #         "profile": "lumencanvas"
+            #     },
+            #     "until": {  # Optional end condition
+            #         "type": "time",
+            #         "time": "18:00"
+            #     }
+            # }
+        ]
+    },
+    "saved_networks": [
+        # {
+        #     "ssid": "MyNetwork",
+        #     "password": "",  # Encrypted or empty for open
+        #     "priority": 1,  # Higher = preferred
+        #     "auto_connect": True,
+        #     "added_at": "2024-01-15T10:30:00Z",
+        #     "last_connected": "2024-01-15T10:30:00Z",
+        #     "notes": "Office WiFi"
+        # }
+    ],
+    "wifi_networks": []  # Legacy, kept for compatibility
+}
+
 class ConfigHandler(SimpleHTTPRequestHandler):
     def __init__(self, *args, **kwargs):
         super().__init__(*args, directory=UI_DIR, **kwargs)
@@ -42,9 +136,9 @@ class ConfigHandler(SimpleHTTPRequestHandler):
         parsed_path = urlparse(self.path)
         path_parts = parsed_path.path.strip('/').split('/')
 
-        # Serve control panel at root
+        # Serve index at root
         if parsed_path.path == '/':
-            self.path = '/control-panel.html'
+            self.path = '/index.html'
             return SimpleHTTPRequestHandler.do_GET(self)
 
         # API endpoints
@@ -55,6 +149,25 @@ class ConfigHandler(SimpleHTTPRequestHandler):
                 self.handle_get_startup()
             elif parsed_path.path == '/api/services':
                 self.handle_get_services()
+            elif parsed_path.path == '/api/behaviors':
+                self.handle_get_behaviors()
+            elif parsed_path.path == '/api/profiles':
+                self.handle_get_profiles()
+            elif parsed_path.path == '/api/config':
+                self.handle_get_config()
+            elif parsed_path.path == '/api/system/info':
+                self.handle_system_info()
+            elif parsed_path.path == '/api/schedule':
+                self.handle_get_schedule()
+            elif parsed_path.path == '/api/timezone':
+                self.handle_get_timezone()
+            elif parsed_path.path == '/api/saved-networks':
+                self.handle_get_saved_networks()
+            elif parsed_path.path == '/api/nearby-networks':
+                self.handle_get_nearby_networks()
+            # WiFi Connect compatible endpoints (always available)
+            elif parsed_path.path == '/networks':
+                self.handle_get_nearby_networks_compat()
             elif path_parts[0] == 'api' and path_parts[1] == 'logs':
                 if len(path_parts) > 2:
                     self.handle_get_logs(path_parts[2])
@@ -92,6 +205,27 @@ class ConfigHandler(SimpleHTTPRequestHandler):
             self.handle_service_control(post_data)
         elif parsed_path.path == '/api/test-command':
             self.handle_test_command(post_data)
+        elif parsed_path.path == '/api/behaviors':
+            self.handle_save_behaviors(post_data)
+        elif parsed_path.path == '/api/process/refresh':
+            self.handle_process_refresh()
+        elif parsed_path.path == '/api/process/restart':
+            self.handle_process_restart()
+        elif parsed_path.path == '/api/system/reboot':
+            self.handle_system_reboot()
+        elif parsed_path.path == '/api/schedule':
+            self.handle_save_schedule(post_data)
+        elif parsed_path.path == '/api/timezone':
+            self.handle_set_timezone(post_data)
+        elif parsed_path.path == '/api/saved-networks':
+            self.handle_save_network(post_data)
+        elif parsed_path.path == '/api/saved-networks/delete':
+            self.handle_delete_network(post_data)
+        elif parsed_path.path == '/api/saved-networks/connect':
+            self.handle_connect_saved_network(post_data)
+        # WiFi Connect compatible endpoint (always available)
+        elif parsed_path.path == '/connect':
+            self.handle_wifi_connect(post_data)
         elif path_parts[0] == 'api' and path_parts[1] == 'stop-test':
             if len(path_parts) > 2:
                 self.handle_stop_test(path_parts[2])
@@ -171,7 +305,7 @@ class ConfigHandler(SimpleHTTPRequestHandler):
 
             # Send HUP signal to process manager to reload config
             try:
-                with open('/var/run/ossuary-process.pid', 'r') as f:
+                with open('/run/ossuary/process.pid', 'r') as f:
                     pid = int(f.read().strip())
                     os.kill(pid, signal.SIGHUP)
                     service_reloaded = True
@@ -316,19 +450,23 @@ class ConfigHandler(SimpleHTTPRequestHandler):
             else:
                 test_cmd = command
 
-            # Start the process
+            # Start the process with properly managed file handle
+            output_handle = open(output_filename, 'w')
             process = subprocess.Popen(
                 test_cmd,
                 shell=True,
-                stdout=open(output_filename, 'w'),
+                stdout=output_handle,
                 stderr=subprocess.STDOUT,
                 preexec_fn=os.setsid  # Create new process group for easy cleanup
             )
+            # Store the handle so we can close it when process ends
+            # Note: handle will be closed when process cleanup occurs
 
-            # Store process info
+            # Store process info including file handle for proper cleanup
             TEST_PROCESSES[str(process.pid)] = {
                 'process': process,
                 'output_file': output_filename,
+                'output_handle': output_handle,
                 'start_time': time.time()
             }
 
@@ -372,6 +510,11 @@ class ConfigHandler(SimpleHTTPRequestHandler):
             # Clean up if process ended
             if not running:
                 try:
+                    if 'output_handle' in proc_info:
+                        proc_info['output_handle'].close()
+                except:
+                    pass
+                try:
                     os.unlink(output_file)
                 except:
                     pass
@@ -408,7 +551,12 @@ class ConfigHandler(SimpleHTTPRequestHandler):
                 if process.poll() is None:
                     process.kill()
 
-            # Clean up
+            # Clean up file handle and file
+            try:
+                if 'output_handle' in proc_info:
+                    proc_info['output_handle'].close()
+            except:
+                pass
             try:
                 os.unlink(output_file)
             except:
@@ -419,6 +567,520 @@ class ConfigHandler(SimpleHTTPRequestHandler):
 
         except Exception as e:
             self.send_json_response({'error': str(e)}, 500)
+
+    def handle_get_behaviors(self):
+        """Get behavior settings"""
+        try:
+            config = self._load_config()
+            behaviors = config.get('behaviors', DEFAULT_CONFIG.get('behaviors', {}))
+            self.send_json_response(behaviors)
+        except Exception as e:
+            self.send_json_response({'error': str(e)}, 500)
+
+    def handle_save_behaviors(self, post_data):
+        """Save behavior settings"""
+        try:
+            data = json.loads(post_data)
+            config = self._load_config()
+            config['behaviors'] = data
+            self._save_config(config)
+            self.send_json_response({'success': True})
+        except Exception as e:
+            self.send_json_response({'error': str(e)}, 500)
+
+    def handle_get_profiles(self):
+        """Get all profiles"""
+        try:
+            config = self._load_config()
+            profiles = config.get('profiles', DEFAULT_CONFIG.get('profiles', {}))
+            active = config.get('active_profile', 'custom')
+            self.send_json_response({
+                'profiles': profiles,
+                'active': active
+            })
+        except Exception as e:
+            self.send_json_response({'error': str(e)}, 500)
+
+    def handle_get_config(self):
+        """Get full config"""
+        try:
+            config = self._load_config()
+            self.send_json_response(config)
+        except Exception as e:
+            self.send_json_response({'error': str(e)}, 500)
+
+    def handle_system_info(self):
+        """Get system information"""
+        try:
+            hostname = subprocess.run(['hostname'], capture_output=True, text=True).stdout.strip()
+            ip_result = subprocess.run(['hostname', '-I'], capture_output=True, text=True)
+            ip = ip_result.stdout.strip().split()[0] if ip_result.stdout.strip() else ''
+
+            info = {
+                'hostname': hostname,
+                'hostname_local': f"{hostname}.local",
+                'ip': ip,
+                'config_url': f"http://{hostname}.local:8080",
+                'config_url_ip': f"http://{ip}:8080" if ip else None
+            }
+            self.send_json_response(info)
+        except Exception as e:
+            self.send_json_response({'error': str(e)}, 500)
+
+    def handle_process_refresh(self):
+        """Trigger page refresh in running process"""
+        try:
+            # Send HUP signal to process manager
+            pid_file = '/run/ossuary/process.pid'
+            if os.path.exists(pid_file):
+                with open(pid_file, 'r') as f:
+                    pid = int(f.read().strip())
+                os.kill(pid, signal.SIGHUP)
+                self.send_json_response({'success': True, 'message': 'Refresh signal sent'})
+            else:
+                self.send_json_response({'error': 'Process not running'}, 404)
+        except Exception as e:
+            self.send_json_response({'error': str(e)}, 500)
+
+    def handle_process_restart(self):
+        """Restart the running process"""
+        try:
+            result = subprocess.run(
+                ['systemctl', 'restart', 'ossuary-startup'],
+                capture_output=True, text=True, timeout=10
+            )
+            self.send_json_response({
+                'success': result.returncode == 0,
+                'output': result.stdout + result.stderr
+            })
+        except Exception as e:
+            self.send_json_response({'error': str(e)}, 500)
+
+    def handle_system_reboot(self):
+        """Reboot the system"""
+        try:
+            self.send_json_response({'success': True, 'message': 'Rebooting in 3 seconds...'})
+            # Schedule reboot in background to allow response to be sent
+            subprocess.Popen('sleep 3 && reboot', shell=True)
+        except Exception as e:
+            self.send_json_response({'error': str(e)}, 500)
+
+    def _load_config(self):
+        """Load config with defaults"""
+        config = dict(DEFAULT_CONFIG)  # Start with defaults
+        if os.path.exists(CONFIG_FILE):
+            try:
+                with open(CONFIG_FILE, 'r') as f:
+                    saved_config = json.load(f)
+                    # Merge saved config over defaults
+                    config.update(saved_config)
+            except:
+                pass
+        return config
+
+    def _save_config(self, config):
+        """Save config to file"""
+        os.makedirs(os.path.dirname(CONFIG_FILE), exist_ok=True)
+        with open(CONFIG_FILE, 'w') as f:
+            json.dump(config, f, indent=2)
+
+    # Schedule handlers
+    def handle_get_schedule(self):
+        """Get schedule configuration"""
+        try:
+            config = self._load_config()
+            schedule = config.get('schedule', DEFAULT_CONFIG.get('schedule', {}))
+            self.send_json_response(schedule)
+        except Exception as e:
+            self.send_json_response({'error': str(e)}, 500)
+
+    def handle_save_schedule(self, post_data):
+        """Save schedule configuration"""
+        try:
+            data = json.loads(post_data)
+            config = self._load_config()
+            config['schedule'] = data
+            self._save_config(config)
+            # Notify scheduler service to restart (picks up new config)
+            subprocess.run(['systemctl', 'restart', 'ossuary-connection-monitor'],
+                         capture_output=True, timeout=10)
+            self.send_json_response({'success': True})
+        except Exception as e:
+            self.send_json_response({'error': str(e)}, 500)
+
+    def handle_get_timezone(self):
+        """Get current timezone"""
+        try:
+            # Get system timezone
+            result = subprocess.run(['timedatectl', 'show', '--property=Timezone', '--value'],
+                                  capture_output=True, text=True, timeout=5)
+            system_tz = result.stdout.strip() if result.returncode == 0 else 'UTC'
+
+            # Get config timezone setting
+            config = self._load_config()
+            config_tz = config.get('schedule', {}).get('timezone', 'auto')
+
+            # Get list of common timezones
+            common_timezones = [
+                'America/New_York', 'America/Chicago', 'America/Denver', 'America/Los_Angeles',
+                'America/Phoenix', 'America/Anchorage', 'Pacific/Honolulu',
+                'Europe/London', 'Europe/Paris', 'Europe/Berlin', 'Europe/Moscow',
+                'Asia/Tokyo', 'Asia/Shanghai', 'Asia/Singapore', 'Asia/Dubai',
+                'Australia/Sydney', 'Australia/Melbourne', 'Pacific/Auckland',
+                'UTC'
+            ]
+
+            self.send_json_response({
+                'system_timezone': system_tz,
+                'config_timezone': config_tz,
+                'effective_timezone': system_tz if config_tz == 'auto' else config_tz,
+                'available_timezones': common_timezones
+            })
+        except Exception as e:
+            self.send_json_response({'error': str(e)}, 500)
+
+    def handle_set_timezone(self, post_data):
+        """Set timezone"""
+        try:
+            data = json.loads(post_data)
+            timezone = data.get('timezone', 'auto')
+
+            config = self._load_config()
+            if 'schedule' not in config:
+                config['schedule'] = DEFAULT_CONFIG.get('schedule', {})
+            config['schedule']['timezone'] = timezone
+
+            # If not 'auto', also set system timezone
+            if timezone != 'auto':
+                subprocess.run(['timedatectl', 'set-timezone', timezone],
+                             capture_output=True, timeout=10)
+
+            self._save_config(config)
+            self.send_json_response({'success': True, 'timezone': timezone})
+        except Exception as e:
+            self.send_json_response({'error': str(e)}, 500)
+
+    # Saved networks handlers
+    def handle_get_saved_networks(self):
+        """Get saved networks list"""
+        try:
+            config = self._load_config()
+            saved = config.get('saved_networks', [])
+
+            # Also get networks from NetworkManager
+            nm_networks = []
+            try:
+                result = subprocess.run(
+                    ['nmcli', '-t', '-f', 'NAME,TYPE,DEVICE', 'connection', 'show'],
+                    capture_output=True, text=True, timeout=5
+                )
+                if result.returncode == 0:
+                    for line in result.stdout.strip().split('\n'):
+                        if line:
+                            parts = line.split(':')
+                            if len(parts) >= 2 and parts[1] == '802-11-wireless':
+                                nm_networks.append({'ssid': parts[0], 'from_nm': True})
+            except:
+                pass
+
+            self.send_json_response({
+                'saved_networks': saved,
+                'nm_networks': nm_networks
+            })
+        except Exception as e:
+            self.send_json_response({'error': str(e)}, 500)
+
+    def handle_save_network(self, post_data):
+        """Save a network to the list"""
+        try:
+            data = json.loads(post_data)
+            ssid = data.get('ssid', '').strip()
+            password = data.get('password', '')
+            notes = data.get('notes', '')
+            priority = data.get('priority', 0)
+            auto_connect = data.get('auto_connect', True)
+
+            if not ssid:
+                self.send_json_response({'error': 'SSID required'}, 400)
+                return
+
+            config = self._load_config()
+            if 'saved_networks' not in config:
+                config['saved_networks'] = []
+
+            # Check if network already exists
+            existing = next((n for n in config['saved_networks'] if n['ssid'] == ssid), None)
+
+            network_entry = {
+                'ssid': ssid,
+                'password': password,  # Note: In production, this should be encrypted
+                'priority': priority,
+                'auto_connect': auto_connect,
+                'notes': notes,
+                'added_at': existing['added_at'] if existing else time.strftime('%Y-%m-%dT%H:%M:%SZ'),
+                'last_connected': existing.get('last_connected') if existing else None
+            }
+
+            if existing:
+                # Update existing
+                idx = config['saved_networks'].index(existing)
+                config['saved_networks'][idx] = network_entry
+            else:
+                # Add new
+                config['saved_networks'].append(network_entry)
+
+            self._save_config(config)
+
+            # Also add to NetworkManager if password provided
+            if password:
+                try:
+                    # Check if connection already exists in NM
+                    check = subprocess.run(
+                        ['nmcli', 'connection', 'show', ssid],
+                        capture_output=True, timeout=5
+                    )
+                    if check.returncode == 0:
+                        # Update existing
+                        subprocess.run(
+                            ['nmcli', 'connection', 'modify', ssid,
+                             'wifi-sec.psk', password],
+                            capture_output=True, timeout=10
+                        )
+                    else:
+                        # Create new
+                        subprocess.run(
+                            ['nmcli', 'connection', 'add', 'type', 'wifi',
+                             'con-name', ssid, 'ssid', ssid,
+                             'wifi-sec.key-mgmt', 'wpa-psk',
+                             'wifi-sec.psk', password],
+                            capture_output=True, timeout=10
+                        )
+                except:
+                    pass  # Non-critical if NM add fails
+
+            self.send_json_response({'success': True, 'network': network_entry})
+        except Exception as e:
+            self.send_json_response({'error': str(e)}, 500)
+
+    def handle_delete_network(self, post_data):
+        """Delete a saved network"""
+        try:
+            data = json.loads(post_data)
+            ssid = data.get('ssid', '').strip()
+
+            if not ssid:
+                self.send_json_response({'error': 'SSID required'}, 400)
+                return
+
+            config = self._load_config()
+            if 'saved_networks' not in config:
+                config['saved_networks'] = []
+
+            # Remove from saved networks
+            config['saved_networks'] = [n for n in config['saved_networks'] if n['ssid'] != ssid]
+            self._save_config(config)
+
+            # Optionally remove from NetworkManager too
+            if data.get('remove_from_system', False):
+                try:
+                    subprocess.run(
+                        ['nmcli', 'connection', 'delete', ssid],
+                        capture_output=True, timeout=10
+                    )
+                except:
+                    pass
+
+            self.send_json_response({'success': True})
+        except Exception as e:
+            self.send_json_response({'error': str(e)}, 500)
+
+    def handle_connect_saved_network(self, post_data):
+        """Connect to a saved network"""
+        try:
+            data = json.loads(post_data)
+            ssid = data.get('ssid', '').strip()
+
+            if not ssid:
+                self.send_json_response({'error': 'SSID required'}, 400)
+                return
+
+            # Try to connect via NetworkManager
+            result = subprocess.run(
+                ['nmcli', 'connection', 'up', ssid],
+                capture_output=True, text=True, timeout=30
+            )
+
+            if result.returncode == 0:
+                # Update last_connected
+                config = self._load_config()
+                for network in config.get('saved_networks', []):
+                    if network['ssid'] == ssid:
+                        network['last_connected'] = time.strftime('%Y-%m-%dT%H:%M:%SZ')
+                        break
+                self._save_config(config)
+                self.send_json_response({'success': True, 'message': 'Connected'})
+            else:
+                self.send_json_response({
+                    'success': False,
+                    'error': result.stderr or 'Connection failed'
+                }, 400)
+        except Exception as e:
+            self.send_json_response({'error': str(e)}, 500)
+
+    def handle_get_nearby_networks(self):
+        """Scan for nearby WiFi networks"""
+        try:
+            # Trigger a rescan
+            subprocess.run(['nmcli', 'device', 'wifi', 'rescan'],
+                         capture_output=True, timeout=10)
+            time.sleep(2)  # Give it time to scan
+
+            # Get list of networks
+            result = subprocess.run(
+                ['nmcli', '-t', '-f', 'SSID,SIGNAL,SECURITY,BSSID', 'device', 'wifi', 'list'],
+                capture_output=True, text=True, timeout=10
+            )
+
+            networks = []
+            seen_ssids = set()
+
+            if result.returncode == 0:
+                for line in result.stdout.strip().split('\n'):
+                    if line:
+                        parts = line.split(':')
+                        if len(parts) >= 3:
+                            ssid = parts[0].strip()
+                            if ssid and ssid not in seen_ssids:
+                                seen_ssids.add(ssid)
+                                networks.append({
+                                    'ssid': ssid,
+                                    'signal': int(parts[1]) if parts[1].isdigit() else 0,
+                                    'security': parts[2] if len(parts) > 2 else '',
+                                    'encrypted': parts[2] != '' and parts[2] != '--'
+                                })
+
+            # Sort by signal strength
+            networks.sort(key=lambda x: x['signal'], reverse=True)
+            self.send_json_response({'networks': networks})
+        except Exception as e:
+            self.send_json_response({'error': str(e)}, 500)
+
+    def handle_get_nearby_networks_compat(self):
+        """Get nearby networks in WiFi Connect compatible format"""
+        try:
+            # Trigger a rescan
+            subprocess.run(['nmcli', 'device', 'wifi', 'rescan'],
+                         capture_output=True, timeout=10)
+            time.sleep(2)
+
+            result = subprocess.run(
+                ['nmcli', '-t', '-f', 'SSID,SIGNAL,SECURITY', 'device', 'wifi', 'list'],
+                capture_output=True, text=True, timeout=10
+            )
+
+            networks = []
+            seen_ssids = set()
+
+            if result.returncode == 0:
+                for line in result.stdout.strip().split('\n'):
+                    if line:
+                        parts = line.split(':')
+                        if len(parts) >= 2:
+                            ssid = parts[0].strip()
+                            if ssid and ssid not in seen_ssids:
+                                seen_ssids.add(ssid)
+                                networks.append({
+                                    'ssid': ssid,
+                                    'signal': int(parts[1]) if len(parts) > 1 and parts[1].isdigit() else 0,
+                                    'security': parts[2] if len(parts) > 2 else '',
+                                    'encrypted': len(parts) > 2 and parts[2] != '' and parts[2] != '--'
+                                })
+
+            networks.sort(key=lambda x: x['signal'], reverse=True)
+            # Return as array directly (WiFi Connect format)
+            self.send_json_response(networks)
+        except Exception as e:
+            self.send_json_response([], 200)  # Return empty array on error
+
+    def handle_wifi_connect(self, post_data):
+        """Connect to a WiFi network (WiFi Connect compatible)"""
+        try:
+            data = json.loads(post_data)
+            ssid = data.get('ssid', '').strip()
+            password = data.get('passphrase', '') or data.get('password', '')
+
+            if not ssid:
+                self.send_json_response({'error': 'SSID required'}, 400)
+                return
+
+            # Check if connection already exists
+            check = subprocess.run(
+                ['nmcli', 'connection', 'show', ssid],
+                capture_output=True, timeout=5
+            )
+
+            if check.returncode == 0:
+                # Connection exists, update password if provided and connect
+                if password:
+                    subprocess.run(
+                        ['nmcli', 'connection', 'modify', ssid, 'wifi-sec.psk', password],
+                        capture_output=True, timeout=10
+                    )
+                result = subprocess.run(
+                    ['nmcli', 'connection', 'up', ssid],
+                    capture_output=True, text=True, timeout=30
+                )
+            else:
+                # Create new connection
+                if password:
+                    result = subprocess.run(
+                        ['nmcli', 'device', 'wifi', 'connect', ssid, 'password', password],
+                        capture_output=True, text=True, timeout=30
+                    )
+                else:
+                    result = subprocess.run(
+                        ['nmcli', 'device', 'wifi', 'connect', ssid],
+                        capture_output=True, text=True, timeout=30
+                    )
+
+            if result.returncode == 0:
+                # Also save to our networks list
+                self._save_network_to_list(ssid, password)
+                self.send_json_response({'success': True})
+            else:
+                self.send_json_response({
+                    'error': result.stderr or 'Connection failed'
+                }, 400)
+
+        except Exception as e:
+            self.send_json_response({'error': str(e)}, 500)
+
+    def _save_network_to_list(self, ssid, password):
+        """Helper to save network to saved_networks list"""
+        try:
+            config = self._load_config()
+            if 'saved_networks' not in config:
+                config['saved_networks'] = []
+
+            existing = next((n for n in config['saved_networks'] if n['ssid'] == ssid), None)
+            if not existing:
+                config['saved_networks'].append({
+                    'ssid': ssid,
+                    'password': password,
+                    'priority': 0,
+                    'auto_connect': True,
+                    'notes': '',
+                    'added_at': time.strftime('%Y-%m-%dT%H:%M:%SZ'),
+                    'last_connected': time.strftime('%Y-%m-%dT%H:%M:%SZ')
+                })
+            else:
+                existing['last_connected'] = time.strftime('%Y-%m-%dT%H:%M:%SZ')
+                if password:
+                    existing['password'] = password
+
+            self._save_config(config)
+        except:
+            pass  # Non-critical
 
     def do_OPTIONS(self):
         """Handle CORS preflight"""
@@ -431,11 +1093,19 @@ class ConfigHandler(SimpleHTTPRequestHandler):
 def cleanup_test_processes():
     """Clean up any remaining test processes on exit"""
     global TEST_PROCESSES
-    for pid_str, proc_info in TEST_PROCESSES.items():
+    for pid_str, proc_info in list(TEST_PROCESSES.items()):
         try:
             process = proc_info['process']
             if process.poll() is None:
                 os.killpg(os.getpgid(process.pid), signal.SIGTERM)
+        except:
+            pass
+        try:
+            if 'output_handle' in proc_info:
+                proc_info['output_handle'].close()
+        except:
+            pass
+        try:
             os.unlink(proc_info['output_file'])
         except:
             pass
@@ -452,9 +1122,13 @@ def run_server():
                 else:
                     port = int(sys.argv[sys.argv.index(arg) + 1])
 
-    # Set up signal handlers for cleanup
-    signal.signal(signal.SIGTERM, lambda s, f: cleanup_test_processes())
-    signal.signal(signal.SIGINT, lambda s, f: cleanup_test_processes())
+    # Set up signal handlers for cleanup and exit
+    def signal_handler(signum, frame):
+        cleanup_test_processes()
+        sys.exit(0)
+
+    signal.signal(signal.SIGTERM, signal_handler)
+    signal.signal(signal.SIGINT, signal_handler)
 
     server_address = ('', port)
     httpd = HTTPServer(server_address, ConfigHandler)

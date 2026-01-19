@@ -1,12 +1,14 @@
 # Ossuary Pi - User Guide
 
+Complete guide to setting up and using your Ossuary Pi kiosk.
+
 ## Quick Start
 
 ### Installation
 
 ```bash
 # Clone the repository
-git clone https://github.com/ossuary-dev/ossuary-pi.git
+git clone https://github.com/lumencanvas/ossuary-pi.git
 cd ossuary-pi
 
 # Run installer (requires sudo)
@@ -369,6 +371,6 @@ sudo wifi-connect --help
 
 ### Support
 
-- GitHub Issues: https://github.com/ossuary-dev/ossuary-pi/issues
-- Documentation: `/opt/ossuary/docs/`
+- GitHub Issues: https://github.com/lumencanvas/ossuary-pi/issues
+- Documentation: `/opt/ossuary/docs/` or https://lumencanvas.studio
 - Logs: `/var/log/ossuary-*.log`

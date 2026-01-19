@@ -8,11 +8,13 @@ RED='\033[0;31m'
 GREEN='\033[0;32m'
 YELLOW='\033[1;33m'
 BLUE='\033[0;34m'
+CYAN='\033[0;36m'
 NC='\033[0m'
 
-echo "==========================================="
-echo "    Ossuary Pi - System Status"
-echo "==========================================="
+echo ""
+echo -e "${CYAN}═══════════════════════════════════════════════════════${NC}"
+echo -e "${CYAN}           OSSUARY PI - SYSTEM STATUS                  ${NC}"
+echo -e "${CYAN}═══════════════════════════════════════════════════════${NC}"
 echo ""
 
 # Check if running as root for some commands
@@ -21,141 +23,140 @@ if [[ $EUID -ne 0 ]]; then
    echo ""
 fi
 
-echo "Service Status:"
-echo "---------------"
+echo -e "${BLUE}Services:${NC}"
+echo "─────────────────────────────────────────────────────────"
 
-# Check WiFi Connect
-echo -n "WiFi Connect (Captive Portal): "
-if systemctl is-active --quiet wifi-connect; then
-    echo -e "${GREEN}✓ Running${NC}"
+# Helper function to check service
+check_service() {
+    local service=$1
+    local description=$2
+    local port=$3
 
-    # Check if in AP mode
-    if ps aux | grep -q "[w]ifi-connect.*portal"; then
-        echo "  Mode: AP Mode Active (Ossuary-Setup)"
-    else
-        # Check if connected to WiFi
-        SSID=$(iwgetid -r 2>/dev/null)
-        if [ -n "$SSID" ]; then
-            echo "  Mode: Connected to WiFi ($SSID)"
-        else
-            echo "  Mode: Waiting for WiFi"
+    printf "%-35s" "$description"
+
+    if systemctl is-active --quiet "$service" 2>/dev/null; then
+        echo -e "${GREEN}● Running${NC}"
+        if [ -n "$port" ]; then
+            echo -e "                                    └─ Port $port"
         fi
-    fi
-else
-    echo -e "${RED}✗ Not Running${NC}"
-    echo "  Fix: sudo systemctl start wifi-connect"
-fi
-
-echo ""
-
-# Check Web Config Server
-echo -n "Web Configuration Server: "
-if systemctl is-active --quiet ossuary-web; then
-    echo -e "${GREEN}✓ Running${NC}"
-
-    # Check if port 80 is listening
-    if netstat -tuln 2>/dev/null | grep -q ":80 "; then
-        echo "  Port 80: Listening"
-        IP=$(hostname -I | awk '{print $1}')
-        echo "  Access: http://$(hostname) or http://$IP"
+        return 0
+    elif systemctl is-enabled --quiet "$service" 2>/dev/null; then
+        echo -e "${YELLOW}○ Enabled (not running)${NC}"
+        return 1
     else
-        echo "  ${YELLOW}Warning: Port 80 not detected${NC}"
+        echo -e "${RED}✗ Not found${NC}"
+        return 2
     fi
-else
-    echo -e "${RED}✗ Not Running${NC}"
-    echo "  Fix: sudo systemctl start ossuary-web"
-fi
+}
+
+# Check all services
+check_service "wifi-connect-manager" "WiFi Connect Manager" ""
+check_service "wifi-connect" "WiFi Connect (AP mode)" "8080"
+check_service "ossuary-web" "Config Web Server" "8080"
+check_service "ossuary-startup" "Process Manager" ""
+check_service "ossuary-connection-monitor" "Connection Monitor" ""
+check_service "captive-portal-proxy" "Captive Portal Proxy" "80"
 
 echo ""
-
-# Check Startup Service
-echo -n "Startup Command Service: "
-if systemctl is-enabled --quiet ossuary-startup; then
-    echo -e "${GREEN}✓ Enabled${NC}"
-
-    # Check if config exists and has a command
-    if [ -f /etc/ossuary/config.json ]; then
-        CMD=$(grep -o '"startup_command"[[:space:]]*:[[:space:]]*"[^"]*"' /etc/ossuary/config.json | sed 's/.*:[[:space:]]*"\(.*\)"/\1/')
-        if [ -n "$CMD" ]; then
-            echo "  Command: $CMD"
-        else
-            echo "  Command: (none configured)"
-        fi
-    else
-        echo "  ${YELLOW}No config file${NC}"
-    fi
-else
-    echo -e "${RED}✗ Not Enabled${NC}"
-    echo "  Fix: sudo systemctl enable ossuary-startup"
-fi
-
-echo ""
-echo "Network Status:"
-echo "---------------"
+echo -e "${BLUE}Network:${NC}"
+echo "─────────────────────────────────────────────────────────"
 
 # WiFi Interface
-WIFI_IF=$(ip link | grep -E '^[0-9]+: wl' | cut -d: -f2 | tr -d ' ' | head -n1)
+WIFI_IF=$(ip link 2>/dev/null | grep -E '^[0-9]+: wl' | cut -d: -f2 | tr -d ' ' | head -n1)
 if [ -n "$WIFI_IF" ]; then
-    echo "WiFi Interface: $WIFI_IF"
+    echo -e "Interface:      ${CYAN}$WIFI_IF${NC}"
 
     # Check if connected
     SSID=$(iwgetid -r 2>/dev/null)
     if [ -n "$SSID" ]; then
-        echo -e "Connected to: ${GREEN}$SSID${NC}"
-        IP=$(hostname -I | awk '{print $1}')
-        echo "IP Address: $IP"
+        echo -e "WiFi Status:    ${GREEN}Connected${NC}"
+        echo -e "Network:        $SSID"
+        IP=$(hostname -I 2>/dev/null | awk '{print $1}')
+        echo -e "IP Address:     $IP"
     else
-        echo -e "WiFi Status: ${YELLOW}Not connected${NC}"
+        echo -e "WiFi Status:    ${YELLOW}Not connected${NC}"
 
         # Check if AP mode is active
-        if iw dev "$WIFI_IF" info 2>/dev/null | grep -q "type AP"; then
-            echo -e "AP Mode: ${GREEN}Active${NC} (Ossuary-Setup)"
-        else
-            echo "AP Mode: Inactive"
+        if systemctl is-active --quiet wifi-connect; then
+            echo -e "AP Mode:        ${GREEN}Active${NC} (Ossuary-Setup)"
         fi
     fi
 else
-    echo -e "${RED}No WiFi interface detected${NC}"
+    echo -e "Interface:      ${RED}No WiFi detected${NC}"
 fi
 
 echo ""
-echo "File Locations:"
-echo "---------------"
-echo "Installation: /opt/ossuary"
-echo "Configuration: /etc/ossuary/config.json"
-echo "Custom UI: /opt/ossuary/custom-ui"
-echo "Logs: journalctl -u wifi-connect -u ossuary-web -u ossuary-startup"
+echo -e "${BLUE}Configuration:${NC}"
+echo "─────────────────────────────────────────────────────────"
 
-echo ""
-echo "Quick Commands:"
-echo "---------------"
-echo "View WiFi Connect logs:    journalctl -u wifi-connect -f"
-echo "View web server logs:      journalctl -u ossuary-web -f"
-echo "Restart all services:      sudo systemctl restart wifi-connect ossuary-web"
-echo "Force AP mode:             sudo systemctl stop NetworkManager && sudo systemctl restart wifi-connect"
+# Check config
+if [ -f /etc/ossuary/config.json ]; then
+    echo -e "Config file:    ${GREEN}Found${NC}"
 
-echo ""
-echo "==========================================="
+    # Extract startup command
+    CMD=$(python3 -c "
+import json
+try:
+    with open('/etc/ossuary/config.json') as f:
+        c = json.load(f)
+        cmd = c.get('startup_command', '')
+        if cmd:
+            # Truncate long commands
+            if len(cmd) > 50:
+                print(cmd[:47] + '...')
+            else:
+                print(cmd)
+except:
+    pass
+" 2>/dev/null)
 
-# If running as root, check for issues
-if [[ $EUID -eq 0 ]]; then
-    ISSUES=0
-
-    if ! systemctl is-active --quiet wifi-connect; then
-        ISSUES=$((ISSUES + 1))
-    fi
-
-    if ! systemctl is-active --quiet ossuary-web; then
-        ISSUES=$((ISSUES + 1))
-    fi
-
-    if [ $ISSUES -gt 0 ]; then
-        echo -e "${YELLOW}⚠ $ISSUES service(s) need attention${NC}"
+    if [ -n "$CMD" ]; then
+        echo -e "Startup cmd:    $CMD"
     else
-        echo -e "${GREEN}✓ All services operational${NC}"
+        echo -e "Startup cmd:    ${YELLOW}(not configured)${NC}"
     fi
 else
-    echo "Run with sudo for full diagnostics"
+    echo -e "Config file:    ${YELLOW}Not found${NC}"
 fi
 
-echo "==========================================="
+echo ""
+echo -e "${BLUE}Access:${NC}"
+echo "─────────────────────────────────────────────────────────"
+
+HOSTNAME=$(hostname)
+IP=$(hostname -I 2>/dev/null | awk '{print $1}')
+
+if [ -n "$IP" ]; then
+    echo -e "Control Panel:  ${CYAN}http://${HOSTNAME}.local:8080${NC}"
+    echo -e "                http://${IP}:8080"
+else
+    echo -e "When in AP mode, connect to: ${CYAN}Ossuary-Setup${NC}"
+    echo -e "Then visit:     http://192.168.42.1"
+fi
+
+echo ""
+echo -e "${BLUE}Quick Commands:${NC}"
+echo "─────────────────────────────────────────────────────────"
+echo "View logs:      journalctl -u ossuary-startup -f"
+echo "Restart all:    sudo systemctl restart ossuary-startup ossuary-web"
+echo "Force AP mode:  sudo systemctl restart wifi-connect-manager"
+
+echo ""
+echo -e "${CYAN}═══════════════════════════════════════════════════════${NC}"
+
+# Summary
+ISSUES=0
+for svc in wifi-connect-manager ossuary-web ossuary-startup ossuary-connection-monitor; do
+    if ! systemctl is-active --quiet "$svc" 2>/dev/null; then
+        ISSUES=$((ISSUES + 1))
+    fi
+done
+
+if [ $ISSUES -eq 0 ]; then
+    echo -e "${GREEN}✓ All core services running${NC}"
+else
+    echo -e "${YELLOW}⚠ $ISSUES service(s) not running${NC}"
+fi
+
+echo -e "${CYAN}═══════════════════════════════════════════════════════${NC}"
+echo ""

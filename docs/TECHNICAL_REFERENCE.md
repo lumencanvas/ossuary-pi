@@ -34,7 +34,7 @@ wifi-connect \
   --portal-ssid "Ossuary-Setup" \        # AP network name
   --ui-directory /opt/ossuary/custom-ui \ # Custom web interface
   --activity-timeout 600 \                # Seconds before AP timeout
-  --portal-listening-port 80              # Captive portal port
+  --portal-listening-port 8080            # Captive portal port
 ```
 
 #### Environment Requirements
@@ -49,11 +49,13 @@ DBUS_SYSTEM_BUS_ADDRESS=unix:path=/run/dbus/system_bus_socket
 /opt/ossuary/
 ├── process-manager.sh       # Main process manager script
 ├── scripts/
-│   └── config-server.py     # Web configuration server
+│   ├── config-server.py     # Web configuration server
+│   ├── wifi-connect-manager.sh  # WiFi/AP mode management
+│   ├── connection-monitor.sh    # Network event monitoring
+│   └── captive-portal-proxy.py  # Port 80 proxy for captive detection
 ├── custom-ui/
-│   ├── index.html           # WiFi Connect captive portal
-│   ├── control-panel.html   # Main control interface
-│   └── ...                  # Supporting files
+│   ├── index.html           # Main control panel & captive portal UI
+│   └── welcome.html         # First-run welcome page
 └── docs/                    # Documentation
 ```
 
@@ -67,8 +69,9 @@ DBUS_SYSTEM_BUS_ADDRESS=unix:path=/run/dbus/system_bus_socket
 
 ##### PID Management
 ```bash
-/var/run/ossuary-process.pid       # Main manager PID
-/var/run/ossuary-process.pid.child # Managed process PID
+/run/ossuary/process.pid           # Main manager PID
+/run/ossuary/process.pid.child     # Managed process PID
+/run/ossuary/process.pid.welcome   # Welcome page browser PID (first run)
 ```
 
 ##### Environment Detection

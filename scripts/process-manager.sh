@@ -8,6 +8,12 @@ LOG_FILE="/var/log/ossuary-process.log"
 PID_FILE="/run/ossuary/process.pid"
 RESTART_DELAY=5
 
+# Essential Chromium flags for kiosk mode (prevents password prompts, crash dialogs, etc.)
+CHROMIUM_KIOSK_FLAGS="--password-store=basic --disable-session-crashed-bubble --disable-infobars --noerrdialogs --disable-translate --disable-features=TranslateUI --autoplay-policy=no-user-gesture-required --check-for-update-interval=31536000"
+
+# WebGPU/Performance flags for LumenCanvas and graphics-heavy apps
+CHROMIUM_WEBGPU_FLAGS="--enable-features=Vulkan,UseSkiaRenderer,WebGPU --enable-unsafe-webgpu --disable-gpu-sandbox --ignore-gpu-blocklist --enable-gpu-rasterization"
+
 # Ensure log directory exists
 mkdir -p "$(dirname "$LOG_FILE")"
 
@@ -30,6 +36,70 @@ except:
     pass
 "
     fi
+}
+
+# Function to prepare chromium (clear crash state, add essential flags)
+prepare_chromium() {
+    local user_home="$1"
+
+    log "Preparing Chromium for kiosk mode..."
+
+    # Clear crash state to prevent "Restore pages?" dialog
+    local prefs_file="$user_home/.config/chromium/Default/Preferences"
+    if [ -f "$prefs_file" ]; then
+        log "Clearing Chromium crash state..."
+        sed -i 's/"exited_cleanly":false/"exited_cleanly":true/' "$prefs_file" 2>/dev/null || true
+        sed -i 's/"exit_type":"Crashed"/"exit_type":"Normal"/' "$prefs_file" 2>/dev/null || true
+    fi
+
+    # Also check for chromium-browser preferences (some systems use this)
+    local prefs_file_alt="$user_home/.config/chromium-browser/Default/Preferences"
+    if [ -f "$prefs_file_alt" ]; then
+        sed -i 's/"exited_cleanly":false/"exited_cleanly":true/' "$prefs_file_alt" 2>/dev/null || true
+        sed -i 's/"exit_type":"Crashed"/"exit_type":"Normal"/' "$prefs_file_alt" 2>/dev/null || true
+    fi
+}
+
+# Function to enhance chromium command with essential flags
+enhance_chromium_command() {
+    local command="$1"
+    local enhanced="$command"
+
+    # Only enhance if this is a chromium command
+    if ! echo "$command" | grep -qE "chrom(e|ium)"; then
+        echo "$command"
+        return
+    fi
+
+    log "Enhancing Chromium command with kiosk flags..."
+
+    # Add password-store=basic if not present (prevents keyring prompts)
+    if ! echo "$command" | grep -q "password-store"; then
+        enhanced=$(echo "$enhanced" | sed 's/chromium\(-browser\)\?/& --password-store=basic/')
+        log "Added --password-store=basic flag"
+    fi
+
+    # Add disable-session-crashed-bubble if not present
+    if ! echo "$command" | grep -q "disable-session-crashed-bubble"; then
+        enhanced=$(echo "$enhanced" | sed 's/chromium\(-browser\)\?/& --disable-session-crashed-bubble/')
+    fi
+
+    # Add noerrdialogs if not present
+    if ! echo "$command" | grep -q "noerrdialogs"; then
+        enhanced=$(echo "$enhanced" | sed 's/chromium\(-browser\)\?/& --noerrdialogs/')
+    fi
+
+    # Add disable-infobars if not present
+    if ! echo "$command" | grep -q "disable-infobars"; then
+        enhanced=$(echo "$enhanced" | sed 's/chromium\(-browser\)\?/& --disable-infobars/')
+    fi
+
+    # Add autoplay-policy if not present (needed for video content)
+    if ! echo "$command" | grep -q "autoplay-policy"; then
+        enhanced=$(echo "$enhanced" | sed 's/chromium\(-browser\)\?/& --autoplay-policy=no-user-gesture-required/')
+    fi
+
+    echo "$enhanced"
 }
 
 # Function to detect display server type
@@ -238,8 +308,16 @@ run_command() {
             # Kill existing Chrome/Chromium instances if starting Chrome
             if echo "$command" | grep -qE "chrom(e|ium)"; then
                 log "Killing existing Chrome/Chromium instances..."
-                pkill -f "chrom(e|ium)" 2>/dev/null || true
+                pkill -f "chromium" 2>/dev/null || true
+                pkill -f "chrome" 2>/dev/null || true
                 sleep 2
+
+                # Prepare chromium (clear crash state)
+                prepare_chromium "$HOME"
+
+                # Enhance command with essential kiosk flags
+                command=$(enhance_chromium_command "$command")
+                log "Final command: $command"
             fi
         fi
 
@@ -320,15 +398,15 @@ WRAPPER_EOF
 
         chmod +x "$wrapper_script"
 
-        # Start the wrapper script in a new session with output capture
-        setsid bash "$wrapper_script" 2>&1 | while IFS= read -r line; do
-            echo "[$(date '+%Y-%m-%d %H:%M:%S')] OUTPUT: $line" >> "$LOG_FILE"
-        done &
-
+        # Start the wrapper script in a new session
+        # Use process substitution to avoid pipeline PID capture issues
+        setsid bash "$wrapper_script" >> "$LOG_FILE" 2>&1 &
         CHILD_PID=$!
         echo $CHILD_PID > "${PID_FILE}.child"
 
-        # Monitor the pipeline process
+        log "Started process with PID $CHILD_PID"
+
+        # Wait for the process
         wait $CHILD_PID
         EXIT_CODE=$?
 
@@ -448,6 +526,105 @@ handle_hup() {
 trap handle_term TERM INT
 trap handle_hup HUP
 
+# Path to welcome page
+WELCOME_PAGE="/opt/ossuary/custom-ui/welcome.html"
+
+# Function to check network connectivity
+check_network() {
+    ping -c 1 -W 2 8.8.8.8 >/dev/null 2>&1 || ping -c 1 -W 2 1.1.1.1 >/dev/null 2>&1
+}
+
+# Function to show the first-run welcome page
+show_welcome_page() {
+    log "Showing first-run welcome page..."
+
+    # Setup GUI environment
+    setup_gui_environment
+
+    # Wait for display (shorter timeout for welcome page)
+    local max_wait=30
+    local waited=0
+    while [ $waited -lt $max_wait ]; do
+        if wait_for_display; then
+            break
+        fi
+        sleep 2
+        waited=$((waited + 2))
+    done
+
+    # Prepare Chromium
+    prepare_chromium "$HOME"
+
+    # Kill any existing browsers
+    pkill -f "chromium" 2>/dev/null || true
+    pkill -f "chrome" 2>/dev/null || true
+    sleep 1
+
+    # Determine the user to run as
+    local run_user="pi"
+    if ! id "pi" &>/dev/null; then
+        run_user=$(getent passwd | awk -F: '$3 >= 1000 && $3 < 65534 {print $1}' | head -1)
+    fi
+
+    # Launch Chromium with welcome page in kiosk mode
+    local chromium_cmd="chromium-browser --kiosk --password-store=basic --disable-session-crashed-bubble --disable-infobars --noerrdialogs --check-for-update-interval=31536000 file://${WELCOME_PAGE}"
+
+    log "Launching welcome page: $chromium_cmd"
+
+    # Run as the appropriate user
+    su "$run_user" -c "export DISPLAY='${DISPLAY:-:0}'; \
+        export XAUTHORITY='${HOME}/.Xauthority'; \
+        export HOME='${HOME}'; \
+        export WAYLAND_DISPLAY='${WAYLAND_DISPLAY:-wayland-0}'; \
+        export XDG_RUNTIME_DIR='${XDG_RUNTIME_DIR:-/run/user/1000}'; \
+        $chromium_cmd" >> "$LOG_FILE" 2>&1 &
+
+    WELCOME_PID=$!
+    echo $WELCOME_PID > "${PID_FILE}.welcome"
+    log "Welcome page browser started (PID $WELCOME_PID)"
+
+    # Monitor for command being set
+    log "Monitoring for startup command configuration..."
+    while true; do
+        sleep 3
+
+        # Check if command has been set
+        local current_command=$(get_command)
+        if [ -n "$current_command" ]; then
+            log "Startup command configured: $current_command"
+            break
+        fi
+
+        # Check if welcome browser died
+        if [ -f "${PID_FILE}.welcome" ]; then
+            local wpid=$(cat "${PID_FILE}.welcome")
+            if ! kill -0 "$wpid" 2>/dev/null; then
+                log "Welcome browser died, restarting..."
+                su "$run_user" -c "export DISPLAY='${DISPLAY:-:0}'; \
+                    export XAUTHORITY='${HOME}/.Xauthority'; \
+                    export HOME='${HOME}'; \
+                    export WAYLAND_DISPLAY='${WAYLAND_DISPLAY:-wayland-0}'; \
+                    export XDG_RUNTIME_DIR='${XDG_RUNTIME_DIR:-/run/user/1000}'; \
+                    $chromium_cmd" >> "$LOG_FILE" 2>&1 &
+                WELCOME_PID=$!
+                echo $WELCOME_PID > "${PID_FILE}.welcome"
+            fi
+        fi
+    done
+
+    # Kill welcome page browser
+    log "Closing welcome page..."
+    if [ -f "${PID_FILE}.welcome" ]; then
+        local wpid=$(cat "${PID_FILE}.welcome")
+        kill -TERM "$wpid" 2>/dev/null || true
+        sleep 1
+        kill -KILL "$wpid" 2>/dev/null || true
+        rm -f "${PID_FILE}.welcome"
+    fi
+    pkill -f "welcome.html" 2>/dev/null || true
+    sleep 2
+}
+
 # Main execution
 main() {
     # Ensure runtime directory exists
@@ -473,11 +650,42 @@ main() {
     log "PID: $$"
     log "==================================="
 
-    # Wait for network if needed (extended timeout for boot scenarios)
+    # Check for first-run scenario (no command configured)
+    COMMAND=$(get_command)
+
+    if [ -z "$COMMAND" ]; then
+        log "No startup command configured - checking for first-run scenario"
+
+        # Wait briefly for system to stabilize
+        log "Waiting 5 seconds for system to stabilize..."
+        sleep 5
+
+        # Check if welcome page exists
+        if [ -f "$WELCOME_PAGE" ]; then
+            # Show welcome page (will block until command is configured)
+            show_welcome_page
+
+            # Re-fetch command after welcome page closes
+            COMMAND=$(get_command)
+        else
+            log "Welcome page not found at $WELCOME_PAGE"
+        fi
+    fi
+
+    # If we still have no command, wait for network and command with periodic checks
+    if [ -z "$COMMAND" ]; then
+        log "Waiting for startup command to be configured..."
+        while [ -z "$COMMAND" ]; do
+            sleep 10
+            COMMAND=$(get_command)
+        done
+    fi
+
+    # Now we have a command - wait for network if needed
     log "Waiting for network connectivity..."
     local network_found=false
     for i in {1..60}; do
-        if ping -c 1 -W 2 8.8.8.8 >/dev/null 2>&1 || ping -c 1 -W 2 1.1.1.1 >/dev/null 2>&1; then
+        if check_network; then
             log "Network is up after $((i*2)) seconds"
             network_found=true
             break
@@ -493,12 +701,10 @@ main() {
     fi
 
     # Add startup delay for system stabilization (important for GUI apps)
-    log "Waiting 10 seconds for system to stabilize..."
-    sleep 10
+    log "Waiting 5 seconds for system to stabilize..."
+    sleep 5
 
-    # Get and run the command
-    COMMAND=$(get_command)
-
+    # Run the configured command
     if [ -n "$COMMAND" ]; then
         run_command "$COMMAND"
     else

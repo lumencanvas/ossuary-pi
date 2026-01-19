@@ -1,33 +1,19 @@
 # Troubleshooting Guide
 
+Quick solutions for common Ossuary Pi issues.
+
 ## WiFi Connect Service Not Starting
 
 ### Error: "No such file or directory"
 
 This means the WiFi Connect binary wasn't installed properly.
 
-**Quick Fix:**
+**Fix: Re-run the installer**
 ```bash
-sudo ./fix-wifi-connect.sh
+sudo ./install.sh
 ```
 
-**Manual Fix:**
-```bash
-# For Pi 4/5 (64-bit):
-wget https://github.com/balena-os/wifi-connect/releases/download/v4.14.4/wifi-connect-linux-aarch64.tar.gz
-tar -xzf wifi-connect-linux-aarch64.tar.gz
-sudo mv wifi-connect /usr/local/bin/
-sudo chmod +x /usr/local/bin/wifi-connect
-
-# For Pi 3/Zero 2 W (32-bit):
-wget https://github.com/balena-os/wifi-connect/releases/download/v4.14.4/wifi-connect-linux-armv7hf.tar.gz
-tar -xzf wifi-connect-linux-armv7hf.tar.gz
-sudo mv wifi-connect /usr/local/bin/
-sudo chmod +x /usr/local/bin/wifi-connect
-
-# Restart service
-sudo systemctl restart wifi-connect
-```
+The installer will automatically detect the correct architecture and download the appropriate binary.
 
 ### Error: "Unable to locate executable"
 
@@ -81,7 +67,7 @@ sudo systemctl disable dhcpcd
 
 ## Config Page Not Accessible
 
-### Can't access http://[hostname]
+### Can't access http://[hostname]:8080
 
 1. **Check web service:**
 ```bash
@@ -94,15 +80,14 @@ sudo journalctl -u ossuary-web -n 50
 sudo systemctl restart ossuary-web
 ```
 
-3. **Check port 80:**
+3. **Check port 8080:**
 ```bash
-sudo netstat -tulpn | grep :80
-# If something else is using port 80, stop it
+sudo ss -tulpn | grep :8080
 ```
 
 4. **Test locally:**
 ```bash
-curl http://localhost/status
+curl http://localhost:8080/api/status
 ```
 
 ## Startup Command Not Running
@@ -228,14 +213,14 @@ If you're still having issues:
 
 1. Run diagnostics:
 ```bash
+./check-status.sh
 sudo journalctl -u wifi-connect -n 100 > wifi-connect.log
+sudo journalctl -u ossuary-startup -n 100 > startup.log
 sudo systemctl status wifi-connect ossuary-startup ossuary-web > services.log
-uname -a > system.log
 ```
 
-2. Check the tracking folder for detailed documentation:
-```bash
-ls -la tracking/
-```
+2. Check the documentation:
+   - [User Guide](docs/USER_GUIDE.md)
+   - [Technical Reference](docs/TECHNICAL_REFERENCE.md)
 
-3. Report issues with logs attached
+3. Report issues: https://github.com/lumencanvas/ossuary-pi/issues
