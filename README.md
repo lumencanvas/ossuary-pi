@@ -14,7 +14,8 @@
 <p align="center">
   <a href="#features">Features</a> •
   <a href="#quick-start">Quick Start</a> •
-  <a href="#full-setup-guide">Full Setup</a> •
+  <a href="#pre-built-image-setup">Pre-Built Image</a> •
+  <a href="#full-setup-guide-manual-installation">Manual Setup</a> •
   <a href="#configuration">Configuration</a> •
   <a href="#troubleshooting">Troubleshooting</a>
 </p>
@@ -44,6 +45,12 @@
 
 ## Quick Start
 
+**Option A: Pre-Built Image (Recommended)**
+
+Download our pre-built image with Ossuary pre-installed — no manual installation required.
+
+**Option B: Manual Install**
+
 If you already have a Pi with Raspberry Pi OS and SSH access:
 
 ```bash
@@ -56,7 +63,92 @@ The installer will configure everything and reboot. After reboot, access the con
 
 ---
 
-## Full Setup Guide
+## Pre-Built Image Setup
+
+The easiest way to get started — a complete Raspberry Pi OS image with Ossuary pre-installed.
+
+### Step 1: Download the Image
+
+Download the latest release:
+
+- **Latest**: [ossuary-pi.img.zip](https://github.com/lumencanvas/ossuary-pi/releases/latest/download/ossuary-pi.img.zip)
+- **All Releases**: [GitHub Releases](https://github.com/lumencanvas/ossuary-pi/releases)
+
+### Step 2: Flash with Raspberry Pi Imager
+
+1. **Download and install** [Raspberry Pi Imager](https://www.raspberrypi.com/software/) if you haven't already
+
+2. **Open Raspberry Pi Imager** and configure:
+
+   | Setting | Selection |
+   |---------|-----------|
+   | **Device** | Your Raspberry Pi model (Pi 4, Pi 5, etc.) |
+   | **Operating System** | Scroll down → **Use custom** → Select the downloaded `.img.zip` file |
+   | **Storage** | Your SD card |
+
+3. **Click "Next"** — Pi Imager will ask if you want to customize settings
+
+4. **Click "Edit Settings"** to configure:
+
+   **General tab:**
+   - ✅ Set hostname: `ossuary` (or your preferred name)
+   - ✅ Set username and password: `pi` / `your-password`
+   - ✅ Configure wireless LAN: Enter your WiFi name and password
+   - ✅ Set locale settings: Your timezone and keyboard layout
+
+   **Services tab:**
+   - ✅ Enable SSH: Use password authentication
+
+   <p align="center">
+     <img src="https://www.raspberrypi.com/documentation/computers/images/imager/os-customisation-general.png" alt="Pi Imager Settings" width="400">
+   </p>
+
+5. **Click "Save"** then **"Yes"** to apply settings
+
+6. **Click "Yes"** to confirm and write the image
+
+> ⏱️ Writing takes 5-15 minutes depending on your SD card speed.
+
+### Step 3: First Boot
+
+1. **Insert the SD card** into your Raspberry Pi
+2. **Connect a display** (HDMI) and power on
+3. **Wait 1-2 minutes** for first boot to complete
+
+**What you'll see:**
+- The Pi boots and shows a welcome page with setup instructions
+- If you configured WiFi in Pi Imager, it will connect automatically
+- The control panel becomes available at `http://your-hostname.local:8081`
+
+### Step 4: Access the Control Panel
+
+Once booted, open a browser on any device connected to the same network:
+
+```
+http://ossuary.local:8081
+```
+
+(Replace `ossuary` with your chosen hostname)
+
+From the control panel you can:
+- Select a preset (LumenCanvas, Web Kiosk, Custom)
+- Configure the startup command
+- Manage WiFi networks
+- Set up scheduled refreshes
+
+### If WiFi Wasn't Configured
+
+If you didn't set up WiFi in Pi Imager, or need to change networks:
+
+1. The Pi will broadcast a **"Ossuary-Setup"** WiFi network
+2. Connect your phone/laptop to this network
+3. A captive portal opens (or visit `http://192.168.42.1`)
+4. Select your WiFi network and enter the password
+5. The Pi connects and your kiosk starts
+
+---
+
+## Full Setup Guide (Manual Installation)
 
 ### Step 1: Prepare the SD Card
 
