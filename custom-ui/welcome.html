@@ -27,57 +27,75 @@
             background: var(--paper);
             color: var(--ink);
             min-height: 100vh;
+            width: 100vw;
             display: flex;
-            flex-direction: column;
             align-items: center;
             justify-content: center;
-            /* Equal padding on all sides for round/square displays - keeps content in center safe zone */
-            padding: 12vmin;
             text-align: center;
+            overflow: hidden;
         }
 
         .container {
+            /*
+             * For round displays: content must fit in the inscribed square
+             * Inscribed square of a circle = diameter × 0.707
+             * Using 70vmin ensures content fits within the safe circle area
+             */
+            width: 70vmin;
+            height: 70vmin;
             max-width: 500px;
-            width: 100%;
-            /* Additional padding inside container */
-            padding: 1.5rem;
+            max-height: 500px;
+            display: flex;
+            flex-direction: column;
+            justify-content: center;
+            padding: 1rem;
+            overflow: hidden;
         }
 
-        .logo {
-            margin-bottom: 2rem;
+        .header {
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            gap: 0.5rem;
+            margin-bottom: 0.25rem;
+            flex-shrink: 0;
         }
 
         .logo svg {
-            width: 120px;
-            height: 120px;
+            width: 8vmin;
+            height: 8vmin;
+            max-width: 48px;
+            max-height: 48px;
+            min-width: 28px;
+            min-height: 28px;
         }
 
         h1 {
-            font-size: 2rem;
+            font-size: clamp(1rem, 4vmin, 1.75rem);
             font-weight: 600;
-            margin-bottom: 0.5rem;
             letter-spacing: -0.02em;
         }
 
         .subtitle {
-            font-size: 1rem;
+            font-size: clamp(0.7rem, 2.5vmin, 0.9rem);
             color: var(--muted);
-            margin-bottom: 2.5rem;
+            margin-bottom: 1rem;
         }
 
         .card {
             background: white;
-            border-radius: 12px;
-            padding: 2rem;
-            margin-bottom: 1.5rem;
+            border-radius: 8px;
+            padding: clamp(0.5rem, 2vmin, 1rem);
+            margin-bottom: 0.75rem;
             box-shadow: 0 1px 3px rgba(0,0,0,0.08);
+            flex-shrink: 0;
         }
 
         .card h2 {
-            font-size: 1rem;
+            font-size: clamp(0.6rem, 2vmin, 0.8rem);
             font-weight: 500;
             color: var(--teal);
-            margin-bottom: 1rem;
+            margin-bottom: 0.5rem;
             text-transform: uppercase;
             letter-spacing: 0.05em;
         }
@@ -86,7 +104,7 @@
             display: flex;
             align-items: flex-start;
             text-align: left;
-            margin-bottom: 1rem;
+            margin-bottom: 0.5rem;
         }
 
         .step:last-child {
@@ -94,56 +112,57 @@
         }
 
         .step-number {
-            width: 28px;
-            height: 28px;
-            min-width: 28px;
+            width: clamp(18px, 4vmin, 24px);
+            height: clamp(18px, 4vmin, 24px);
+            min-width: clamp(18px, 4vmin, 24px);
             background: var(--lc-blue);
             border-radius: 50%;
             display: flex;
             align-items: center;
             justify-content: center;
             font-family: 'Space Mono', monospace;
-            font-size: 0.875rem;
+            font-size: clamp(0.6rem, 2vmin, 0.75rem);
             font-weight: 600;
-            margin-right: 1rem;
-            margin-top: 2px;
+            margin-right: 0.5rem;
+            flex-shrink: 0;
         }
 
         .step-content h3 {
-            font-size: 1rem;
+            font-size: clamp(0.7rem, 2.5vmin, 0.9rem);
             font-weight: 500;
-            margin-bottom: 0.25rem;
+            margin-bottom: 0.1rem;
         }
 
         .step-content p {
-            font-size: 0.875rem;
+            font-size: clamp(0.6rem, 2vmin, 0.75rem);
             color: var(--muted);
-            line-height: 1.5;
+            line-height: 1.4;
         }
 
         .highlight {
             font-family: 'Space Mono', monospace;
             background: var(--paper);
-            padding: 0.125rem 0.5rem;
+            padding: 0.1rem 0.4rem;
             border-radius: 4px;
-            font-size: 0.875rem;
+            font-size: clamp(0.6rem, 2vmin, 0.75rem);
             display: inline-block;
-            margin-top: 0.25rem;
+            margin-top: 0.15rem;
         }
 
         .status {
             display: flex;
             align-items: center;
             justify-content: center;
-            gap: 0.5rem;
+            gap: 0.4rem;
             color: var(--muted);
-            font-size: 0.875rem;
-            margin-top: 1rem;
+            font-size: clamp(0.6rem, 2vmin, 0.75rem);
+            margin-top: 0.5rem;
+            flex-shrink: 0;
         }
 
         .pulse {
-            width: 8px;
-            height: 8px;
+            width: 6px;
+            height: 6px;
             background: var(--teal);
             border-radius: 50%;
             animation: pulse 2s infinite;
@@ -155,9 +174,10 @@
         }
 
         .footer {
-            margin-top: 2rem;
-            font-size: 0.75rem;
+            margin-top: 0.75rem;
+            font-size: clamp(0.5rem, 1.5vmin, 0.65rem);
             color: var(--muted);
+            flex-shrink: 0;
         }
 
         .footer a {
@@ -165,124 +185,20 @@
             text-decoration: none;
         }
 
-        /* Small screens - maintain safe zone for round displays */
-        @media (max-width: 480px) {
-            body {
-                padding: 10vmin;
-            }
-
-            h1 {
-                font-size: 1.5rem;
-            }
-
-            .card {
-                padding: 1.25rem;
-            }
-
-            .logo svg {
-                width: 80px;
-                height: 80px;
+        /* Hide secondary card on very small displays to fit essentials */
+        @media (max-height: 400px), (max-width: 400px) {
+            .card:last-of-type {
+                display: none;
             }
         }
 
-        /* For small kiosk displays and round screens */
-        @media (max-height: 600px) {
-            body {
-                /* Keep generous equal padding for round displays */
-                padding: 10vmin;
-                justify-content: center;
-            }
-
-            .container {
-                padding: 1rem;
-            }
-
-            .logo {
-                margin-bottom: 0.75rem;
-            }
-
-            .logo svg {
-                width: 50px;
-                height: 50px;
-            }
-
-            h1 {
-                font-size: 1.1rem;
-                margin-bottom: 0.25rem;
-            }
-
-            .subtitle {
-                margin-bottom: 0.75rem;
-                font-size: 0.75rem;
-            }
-
-            .card {
-                padding: 0.75rem;
-                margin-bottom: 0.75rem;
-            }
-
-            .card h2 {
-                font-size: 0.75rem;
-                margin-bottom: 0.5rem;
-            }
-
-            .step {
-                margin-bottom: 0.5rem;
-            }
-
-            .step-number {
-                width: 20px;
-                height: 20px;
-                min-width: 20px;
-                font-size: 0.65rem;
-                margin-right: 0.5rem;
-            }
-
-            .step-content h3 {
-                font-size: 0.8rem;
+        /* Very small displays - hide footer too */
+        @media (max-height: 300px), (max-width: 300px) {
+            .footer {
+                display: none;
             }
 
             .step-content p {
-                font-size: 0.7rem;
-            }
-
-            .highlight {
-                font-size: 0.7rem;
-                padding: 0.1rem 0.35rem;
-            }
-
-            .status {
-                margin-top: 0.5rem;
-                font-size: 0.7rem;
-            }
-
-            .footer {
-                margin-top: 0.75rem;
-                font-size: 0.6rem;
-            }
-        }
-
-        /* Very small round displays (e.g., 240px) */
-        @media (max-width: 300px), (max-height: 300px) {
-            body {
-                padding: 15vmin;
-            }
-
-            .logo svg {
-                width: 40px;
-                height: 40px;
-            }
-
-            h1 {
-                font-size: 0.9rem;
-            }
-
-            .subtitle {
-                font-size: 0.65rem;
-            }
-
-            .card:last-of-type,
-            .footer {
                 display: none;
             }
         }
@@ -290,20 +206,21 @@
 </head>
 <body>
     <div class="container">
-        <div class="logo">
-            <!-- LumenCanvas Logo -->
-            <svg viewBox="0 0 100 100" fill="none" xmlns="http://www.w3.org/2000/svg">
-                <rect x="20" y="20" width="60" height="60" rx="4" fill="none" stroke="var(--ink)" stroke-width="2"/>
-                <defs>
-                    <clipPath id="canvasClip">
-                        <rect x="22" y="22" width="56" height="56" rx="2"/>
-                    </clipPath>
-                </defs>
-                <polygon points="0,0 50,50 0,100" fill="var(--lc-blue)" clip-path="url(#canvasClip)"/>
-            </svg>
+        <div class="header">
+            <div class="logo">
+                <!-- LumenCanvas Logo -->
+                <svg viewBox="0 0 100 100" fill="none" xmlns="http://www.w3.org/2000/svg">
+                    <rect x="20" y="20" width="60" height="60" rx="4" fill="none" stroke="var(--ink)" stroke-width="2"/>
+                    <defs>
+                        <clipPath id="canvasClip">
+                            <rect x="22" y="22" width="56" height="56" rx="2"/>
+                        </clipPath>
+                    </defs>
+                    <polygon points="0,0 50,50 0,100" fill="var(--lc-blue)" clip-path="url(#canvasClip)"/>
+                </svg>
+            </div>
+            <h1>Welcome to Ossuary</h1>
         </div>
-
-        <h1>Welcome to Ossuary</h1>
         <p class="subtitle">Your kiosk is ready to be configured</p>
 
         <div class="card">
