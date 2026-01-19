@@ -160,12 +160,8 @@ start_wifi_connect() {
 
     log "No WiFi connection detected, starting captive portal..."
 
-    # Stop ossuary-web first to free up port 8080
-    if systemctl is-active --quiet ossuary-web; then
-        log "Stopping ossuary-web to free port 8080 for captive portal..."
-        systemctl stop ossuary-web
-        sleep 1
-    fi
+    # Note: wifi-connect runs on port 8080, ossuary-web runs on port 8081
+    # They can coexist, no need to stop ossuary-web anymore
 
     # Ensure WiFi Connect doesn't conflict with NetworkManager
     # WiFi Connect will manage the interface when it starts
@@ -174,13 +170,11 @@ start_wifi_connect() {
     if systemctl is-active --quiet wifi-connect; then
         log "WiFi Connect captive portal started successfully on port 8080"
         log "Connect to 'Ossuary-Setup' network to configure WiFi"
+        log "Config interface also available on port 8081"
     else
         log "ERROR: Failed to start WiFi Connect"
         # If WiFi Connect fails, ensure NetworkManager can take back control
         nmcli device set wlan0 managed yes 2>/dev/null || true
-        # Restart ossuary-web since wifi-connect failed
-        log "Restarting ossuary-web..."
-        systemctl start ossuary-web
     fi
 }
 
@@ -199,9 +193,7 @@ stop_wifi_connect() {
         sleep 1
         nmcli device connect wlan0 2>/dev/null || true
 
-        # Restart ossuary-web now that port 8080 is free
-        log "Starting ossuary-web configuration server..."
-        systemctl start ossuary-web
+        # Note: ossuary-web runs on port 8081 and stays running always
     fi
 }
 

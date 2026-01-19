@@ -11,8 +11,14 @@ RESTART_DELAY=5
 # Essential Chromium flags for kiosk mode (prevents password prompts, crash dialogs, etc.)
 CHROMIUM_KIOSK_FLAGS="--password-store=basic --disable-session-crashed-bubble --disable-infobars --noerrdialogs --disable-translate --disable-features=TranslateUI --autoplay-policy=no-user-gesture-required --check-for-update-interval=31536000"
 
-# WebGPU/Performance flags for LumenCanvas and graphics-heavy apps
-CHROMIUM_WEBGPU_FLAGS="--enable-features=Vulkan,UseSkiaRenderer,WebGPU --enable-unsafe-webgpu --disable-gpu-sandbox --ignore-gpu-blocklist --enable-gpu-rasterization"
+# GPU stability flags (--use-gl=egl fixes issues on Pi Zero 2 W and some Pi 4 configs)
+CHROMIUM_GPU_FLAGS="--use-gl=egl --enable-gpu-rasterization --ignore-gpu-blocklist"
+
+# Wayland-specific flags (Pi OS 2024+ uses Wayland by default)
+CHROMIUM_WAYLAND_FLAGS="--ozone-platform=wayland --start-maximized"
+
+# WebGPU/Performance flags for LumenCanvas and graphics-heavy apps (optional, can cause instability)
+CHROMIUM_WEBGPU_FLAGS="--enable-features=Vulkan,UseSkiaRenderer,WebGPU --enable-unsafe-webgpu"
 
 # Ensure log directory exists
 mkdir -p "$(dirname "$LOG_FILE")"
@@ -69,6 +75,7 @@ prepare_chromium() {
 enhance_chromium_command() {
     local command="$1"
     local enhanced="$command"
+    local display_type=$(detect_display_server)
 
     # Only enhance if this is a chromium command
     if ! echo "$command" | grep -qE "chrom(e|ium)"; then
@@ -76,12 +83,11 @@ enhance_chromium_command() {
         return
     fi
 
-    log "Enhancing Chromium command with kiosk flags..."
+    log "Enhancing Chromium command for $display_type..."
 
     # Add password-store=basic if not present (prevents keyring prompts)
     if ! echo "$command" | grep -q "password-store"; then
         enhanced=$(echo "$enhanced" | sed 's/chromium\(-browser\)\?/& --password-store=basic/')
-        log "Added --password-store=basic flag"
     fi
 
     # Add disable-session-crashed-bubble if not present
@@ -102,6 +108,28 @@ enhance_chromium_command() {
     # Add autoplay-policy if not present (needed for video content)
     if ! echo "$command" | grep -q "autoplay-policy"; then
         enhanced=$(echo "$enhanced" | sed 's/chromium\(-browser\)\?/& --autoplay-policy=no-user-gesture-required/')
+    fi
+
+    # Add GPU stability flags (--use-gl=egl fixes issues on many Pi configs)
+    if ! echo "$command" | grep -q "use-gl"; then
+        enhanced=$(echo "$enhanced" | sed 's/chromium\(-browser\)\?/& --use-gl=egl/')
+    fi
+
+    # Add GPU rasterization for better performance
+    if ! echo "$command" | grep -q "enable-gpu-rasterization"; then
+        enhanced=$(echo "$enhanced" | sed 's/chromium\(-browser\)\?/& --enable-gpu-rasterization/')
+    fi
+
+    # Add Wayland-specific flags if running on Wayland (Pi OS 2024+ default)
+    if [ "$display_type" = "wayland" ]; then
+        if ! echo "$command" | grep -q "ozone-platform"; then
+            enhanced=$(echo "$enhanced" | sed 's/chromium\(-browser\)\?/& --ozone-platform=wayland/')
+            log "Added Wayland ozone platform flag"
+        fi
+        # Also add start-maximized for better fullscreen on Wayland
+        if echo "$command" | grep -q "\-\-kiosk" && ! echo "$command" | grep -q "start-maximized"; then
+            enhanced=$(echo "$enhanced" | sed 's/chromium\(-browser\)\?/& --start-maximized/')
+        fi
     fi
 
     echo "$enhanced"
@@ -134,8 +162,8 @@ detect_display_server() {
         return
     fi
 
-    # Pi OS 2025 Wayland compositors
-    if pgrep -x "wayfire" > /dev/null || pgrep -x "weston" > /dev/null || pgrep -x "sway" > /dev/null || pgrep -x "labwc" > /dev/null; then
+    # Pi OS Wayland compositors (labwc is default in late 2024+, wayfire was 2023-2024)
+    if pgrep -x "labwc" > /dev/null || pgrep -x "wayfire" > /dev/null || pgrep -x "weston" > /dev/null || pgrep -x "sway" > /dev/null; then
         echo "wayland"
         return
     fi
@@ -170,8 +198,8 @@ wait_for_display() {
                 log "Wayland display socket is ready"
                 return 0
             fi
-            # Check if any Wayland compositor is running
-            if pgrep -x "wayfire" > /dev/null || pgrep -x "weston" > /dev/null || pgrep -x "sway" > /dev/null || pgrep -x "labwc" > /dev/null; then
+            # Check if any Wayland compositor is running (labwc is Pi OS 2024+ default)
+            if pgrep -x "labwc" > /dev/null || pgrep -x "wayfire" > /dev/null || pgrep -x "weston" > /dev/null || pgrep -x "sway" > /dev/null; then
                 log "Wayland compositor is running"
                 return 0
             fi
@@ -450,19 +478,46 @@ WRAPPER_EOF
         rm -f "${PID_FILE}.child"
 
         # Log the exit
+        local current_time=$(date +%s)
         if [ $EXIT_CODE -eq 0 ]; then
             log "Process exited normally (code 0)"
+            # Reset crash tracking on clean exit
+            crash_count_in_window=0
+            last_crash_time=0
         else
             log "Process crashed with exit code $EXIT_CODE"
+
+            # Time-windowed crash detection (5 minute window)
+            local CRASH_WINDOW=300
+
+            # Initialize tracking vars if not set
+            if [ -z "$last_crash_time" ]; then
+                last_crash_time=0
+                crash_count_in_window=0
+            fi
+
+            # Check if we're still within the crash window
+            local time_since_last=$((current_time - last_crash_time))
+            if [ $time_since_last -gt $CRASH_WINDOW ]; then
+                # Outside window - reset counter
+                crash_count_in_window=1
+            else
+                # Within window - increment counter
+                crash_count_in_window=$((crash_count_in_window + 1))
+            fi
+            last_crash_time=$current_time
+
+            log "Crashes in last 5 minutes: $crash_count_in_window"
         fi
 
         restart_count=$((restart_count + 1))
 
-        # If it crashed too many times too quickly, slow down
-        if [ $restart_count -gt 10 ]; then
-            log "Too many restarts, waiting 30 seconds before retry..."
+        # If it crashed too many times within the time window, slow down
+        if [ "${crash_count_in_window:-0}" -gt 5 ]; then
+            log "Too many crashes in short period ($crash_count_in_window in 5 minutes), waiting 30 seconds..."
             sleep 30
-            restart_count=0
+            # Reset window after long pause
+            crash_count_in_window=0
         else
             log "Restarting in $RESTART_DELAY seconds..."
             sleep $RESTART_DELAY

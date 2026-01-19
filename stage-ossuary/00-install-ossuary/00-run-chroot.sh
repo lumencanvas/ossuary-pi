@@ -84,8 +84,8 @@ EOF
 cat > /etc/systemd/system/ossuary-startup.service << EOF
 [Unit]
 Description=Ossuary Process Manager - Keeps User Command Running
-After=multi-user.target NetworkManager.service
-Wants=network-online.target
+After=multi-user.target NetworkManager.service ossuary-web.service
+Wants=network-online.target ossuary-web.service
 StartLimitIntervalSec=60
 StartLimitBurst=3
 
@@ -126,16 +126,17 @@ StandardError=journal
 WantedBy=multi-user.target
 EOF
 
-# Web configuration service
+# Web configuration service (port 8081 to avoid conflict with wifi-connect on 8080)
 cat > /etc/systemd/system/ossuary-web.service << EOF
 [Unit]
 Description=Ossuary Web Configuration Interface
-After=network-online.target
+After=network-online.target wifi-connect-manager.service
 Wants=network-online.target
+BindsTo=wifi-connect-manager.service
 
 [Service]
 Type=simple
-ExecStart=/usr/bin/python3 $INSTALL_DIR/scripts/config-server.py --port 8080
+ExecStart=/usr/bin/python3 $INSTALL_DIR/scripts/config-server.py --port 8081
 Restart=always
 RestartSec=10
 User=root

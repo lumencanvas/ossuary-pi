@@ -50,11 +50,13 @@ PORTAL_DETECTION_PATHS = {
     '/generate_204',
     '/gen_204',
     '/connectivitycheck.gstatic.com',
+    '/v2/detectNetwork',  # Some Android variants
 
     # Windows devices
     '/connecttest.txt',
     '/ncsi.txt',
     '/redirect',
+    '/fwlink',  # Windows NCSI alternate
 
     # Firefox
     '/canonical.html',
@@ -63,6 +65,13 @@ PORTAL_DETECTION_PATHS = {
     # Linux (NetworkManager/GNOME)
     '/check_network_status.txt',
     '/nm-check-status',
+
+    # Amazon Kindle
+    '/kindle-wifi/wifistub.html',
+
+    # Generic fallbacks
+    '/chat',  # Some captive portal detectors try this
+    '/portal',
 }
 
 

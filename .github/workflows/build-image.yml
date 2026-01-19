@@ -66,6 +66,10 @@ jobs:
           # Increase disk space for build
           increase-runner-disk-size: true
 
+          # Extra host dependencies - ensure GPG keys are available
+          extra-host-dependencies: gnupg debian-archive-keyring
+          extra-host-modules: binfmt_misc
+
       - name: List build output
         run: |
           echo "Build output:"
@@ -99,8 +103,8 @@ jobs:
 
             ### First Boot
 
-            - If WiFi is configured: Access control panel at `http://your-hostname.local:8080`
-            - If no WiFi: Connect to "Ossuary-Setup" network and configure at `http://192.168.42.1`
+            - If WiFi is configured: Access control panel at `http://your-hostname.local:8081`
+            - If no WiFi: Connect to "Ossuary-Setup" network and configure at `http://192.168.42.1:8080`
 
             ### Latest Release
 

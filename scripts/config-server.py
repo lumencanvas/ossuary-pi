@@ -28,6 +28,44 @@ UI_DIR = "/opt/ossuary/custom-ui"
 LOG_DIR = "/var/log"
 TEST_PROCESSES = {}  # Track test processes
 
+# Config schema for validation (basic type checking)
+CONFIG_SCHEMA = {
+    "startup_command": str,
+    "saved_networks": list,
+    "behaviors": dict,
+    "schedule": dict,
+    "profiles": dict,
+    "active_profile": str,
+    "version": int
+}
+
+def validate_config(config):
+    """Validate config against schema. Returns (is_valid, errors)"""
+    errors = []
+
+    for key, expected_type in CONFIG_SCHEMA.items():
+        if key in config:
+            if not isinstance(config[key], expected_type):
+                errors.append(f"'{key}' should be {expected_type.__name__}, got {type(config[key]).__name__}")
+
+    # Validate saved_networks structure
+    if 'saved_networks' in config and isinstance(config['saved_networks'], list):
+        for i, network in enumerate(config['saved_networks']):
+            if not isinstance(network, dict):
+                errors.append(f"saved_networks[{i}] should be a dict")
+            elif 'ssid' not in network:
+                errors.append(f"saved_networks[{i}] missing required 'ssid' field")
+
+    # Validate schedule structure
+    if 'schedule' in config and isinstance(config['schedule'], dict):
+        schedule = config['schedule']
+        if 'enabled' in schedule and not isinstance(schedule['enabled'], bool):
+            errors.append("schedule.enabled should be boolean")
+        if 'rules' in schedule and not isinstance(schedule['rules'], list):
+            errors.append("schedule.rules should be a list")
+
+    return (len(errors) == 0, errors)
+
 # Default config schema v2
 DEFAULT_CONFIG = {
     "version": 2,
@@ -177,6 +215,10 @@ class ConfigHandler(SimpleHTTPRequestHandler):
                     self.handle_test_output(path_parts[2])
                 else:
                     self.send_json_response({'error': 'PID required'}, 400)
+            elif parsed_path.path == '/api/screenshot':
+                self.handle_screenshot()
+            elif parsed_path.path == '/api/display/power':
+                self.handle_get_display_power()
             else:
                 self.send_json_response({'error': 'Not found'}, 404)
 
@@ -224,6 +266,8 @@ class ConfigHandler(SimpleHTTPRequestHandler):
             self.handle_delete_network(post_data)
         elif parsed_path.path == '/api/saved-networks/connect':
             self.handle_connect_saved_network(post_data)
+        elif parsed_path.path == '/api/display/power':
+            self.handle_set_display_power(post_data)
         # WiFi Connect compatible endpoint (always available)
         elif parsed_path.path == '/connect':
             self.handle_wifi_connect(post_data)
@@ -686,7 +730,124 @@ class ConfigHandler(SimpleHTTPRequestHandler):
         try:
             self.send_json_response({'success': True, 'message': 'Rebooting in 3 seconds...'})
             # Schedule reboot in background to allow response to be sent
-            subprocess.Popen('sleep 3 && reboot', shell=True)
+            subprocess.Popen(['/bin/bash', '-c', 'sleep 3 && /sbin/reboot'])
+        except Exception as e:
+            self.send_json_response({'error': str(e)}, 500)
+
+    def handle_screenshot(self):
+        """Capture a screenshot of the current display"""
+        try:
+            screenshot_path = '/tmp/ossuary-screenshot.png'
+
+            # Try different screenshot tools in order of preference
+            success = False
+
+            # Method 1: scrot (works on X11)
+            if not success:
+                result = subprocess.run(
+                    ['scrot', screenshot_path],
+                    capture_output=True, timeout=10,
+                    env={**os.environ, 'DISPLAY': ':0'}
+                )
+                if result.returncode == 0 and os.path.exists(screenshot_path):
+                    success = True
+
+            # Method 2: grim (works on Wayland)
+            if not success:
+                result = subprocess.run(
+                    ['grim', screenshot_path],
+                    capture_output=True, timeout=10
+                )
+                if result.returncode == 0 and os.path.exists(screenshot_path):
+                    success = True
+
+            # Method 3: gnome-screenshot
+            if not success:
+                result = subprocess.run(
+                    ['gnome-screenshot', '-f', screenshot_path],
+                    capture_output=True, timeout=10,
+                    env={**os.environ, 'DISPLAY': ':0'}
+                )
+                if result.returncode == 0 and os.path.exists(screenshot_path):
+                    success = True
+
+            if success and os.path.exists(screenshot_path):
+                # Read and return the image
+                with open(screenshot_path, 'rb') as f:
+                    image_data = f.read()
+                os.unlink(screenshot_path)
+
+                self.send_response(200)
+                self.send_header('Content-type', 'image/png')
+                self.send_header('Content-Length', len(image_data))
+                self.send_header('Cache-Control', 'no-cache')
+                self.end_headers()
+                self.wfile.write(image_data)
+            else:
+                self.send_json_response({
+                    'error': 'Screenshot failed - no compatible tool found (install scrot or grim)'
+                }, 500)
+
+        except subprocess.TimeoutExpired:
+            self.send_json_response({'error': 'Screenshot timed out'}, 500)
+        except Exception as e:
+            self.send_json_response({'error': str(e)}, 500)
+
+    def handle_get_display_power(self):
+        """Get current display power state"""
+        try:
+            # Try vcgencmd (Raspberry Pi specific)
+            result = subprocess.run(
+                ['vcgencmd', 'display_power'],
+                capture_output=True, text=True, timeout=5
+            )
+
+            if result.returncode == 0:
+                output = result.stdout.strip()
+                # Output is like "display_power=1" or "display_power=0"
+                power_on = '=1' in output
+                self.send_json_response({
+                    'power': 'on' if power_on else 'off',
+                    'raw': output
+                })
+            else:
+                self.send_json_response({
+                    'error': 'vcgencmd not available',
+                    'power': 'unknown'
+                }, 500)
+        except Exception as e:
+            self.send_json_response({'error': str(e)}, 500)
+
+    def handle_set_display_power(self, post_data):
+        """Set display power state (on/off)"""
+        try:
+            data = json.loads(post_data)
+            power = data.get('power', '').lower()
+
+            if power not in ['on', 'off', '1', '0']:
+                self.send_json_response({'error': 'power must be "on" or "off"'}, 400)
+                return
+
+            power_value = '1' if power in ['on', '1'] else '0'
+
+            # Use vcgencmd (Raspberry Pi specific)
+            result = subprocess.run(
+                ['vcgencmd', 'display_power', power_value],
+                capture_output=True, text=True, timeout=5
+            )
+
+            if result.returncode == 0:
+                self.send_json_response({
+                    'success': True,
+                    'power': 'on' if power_value == '1' else 'off'
+                })
+            else:
+                self.send_json_response({
+                    'error': 'Failed to set display power',
+                    'details': result.stderr
+                }, 500)
+        except json.JSONDecodeError:
+            self.send_json_response({'error': 'Invalid JSON'}, 400)
         except Exception as e:
             self.send_json_response({'error': str(e)}, 500)
 

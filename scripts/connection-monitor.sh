@@ -100,53 +100,103 @@ send_hup_to_process_manager() {
     return 1
 }
 
-# Send refresh command to Chromium via remote debugging
+# Send refresh command to Chromium via Chrome DevTools Protocol
+# This works on both X11 and Wayland (unlike xdotool which only works on X11)
 refresh_chromium() {
     log "Attempting to refresh Chromium page..."
 
-    # Check if Chromium is running with remote debugging
-    if ! pgrep -f "chromium.*remote-debugging-port" &>/dev/null; then
-        log "Chromium not running with remote debugging, sending SIGHUP to process manager"
-        send_hup_to_process_manager
-        return
-    fi
+    # Method 1: Try Chrome DevTools Protocol (works on both X11 and Wayland)
+    if pgrep -f "chromium.*remote-debugging-port" &>/dev/null; then
+        local debug_url="http://localhost:$CHROMIUM_DEBUG_PORT/json"
+        local pages=$(curl -s --max-time 2 "$debug_url" 2>/dev/null)
 
-    # Try to send reload command via Chrome DevTools Protocol
-    # Get the first page's websocket URL
-    local debug_url="http://localhost:$CHROMIUM_DEBUG_PORT/json"
-
-    # Use curl to get the page list
-    local pages=$(curl -s "$debug_url" 2>/dev/null)
-
-    if [ -z "$pages" ]; then
-        log "Could not connect to Chromium debug port"
-        return
-    fi
-
-    # Extract the first page's webSocketDebuggerUrl
-    local ws_url=$(echo "$pages" | python3 -c "
+        if [ -n "$pages" ]; then
+            # Get the page ID for sending commands
+            local page_id=$(echo "$pages" | python3 -c "
 import json, sys
 try:
     pages = json.load(sys.stdin)
-    if pages and len(pages) > 0:
-        print(pages[0].get('webSocketDebuggerUrl', ''))
+    for page in pages:
+        if page.get('type') == 'page':
+            print(page.get('id', ''))
+            break
 except:
     pass
 " 2>/dev/null)
 
-    if [ -n "$ws_url" ]; then
-        # Use websocat or python to send reload command
-        # For simplicity, we'll use curl with a simple HTTP endpoint approach
-        # The Page.reload command needs websocket, so we'll use a simpler method
+            if [ -n "$page_id" ]; then
+                # Send Page.reload via HTTP endpoint (simpler than websocket)
+                local reload_result=$(curl -s --max-time 5 \
+                    "http://localhost:$CHROMIUM_DEBUG_PORT/json/activate/$page_id" 2>/dev/null)
 
-        # Alternative: Kill and let process manager restart
-        log "Triggering page refresh via process restart..."
-        if send_hup_to_process_manager; then
-            log "Sent HUP signal to process manager"
+                # Use Python to send the actual reload command via websocket
+                python3 -c "
+import json
+import socket
+import ssl
+
+# Simple websocket to send CDP command
+def send_cdp_command(ws_url, method, params=None):
+    try:
+        import urllib.request
+        # Parse ws:// URL
+        if ws_url.startswith('ws://'):
+            host_port = ws_url[5:].split('/')[0]
+            path = '/' + '/'.join(ws_url[5:].split('/')[1:])
+            host, port = host_port.split(':') if ':' in host_port else (host_port, 80)
+            port = int(port)
+
+            # Create socket and send websocket upgrade
+            sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+            sock.settimeout(3)
+            sock.connect((host, port))
+
+            # Websocket handshake
+            import hashlib, base64, os
+            key = base64.b64encode(os.urandom(16)).decode()
+            handshake = f'GET {path} HTTP/1.1\r\nHost: {host}:{port}\r\nUpgrade: websocket\r\nConnection: Upgrade\r\nSec-WebSocket-Key: {key}\r\nSec-WebSocket-Version: 13\r\n\r\n'
+            sock.send(handshake.encode())
+            response = sock.recv(1024)
+
+            if b'101' in response:
+                # Send reload command
+                cmd = json.dumps({'id': 1, 'method': method, 'params': params or {}})
+                frame = bytearray([0x81, len(cmd)]) + cmd.encode()
+                sock.send(bytes(frame))
+                sock.close()
+                return True
+    except:
+        pass
+    return False
+
+# Get page ws URL
+pages = json.loads('''$pages''')
+for page in pages:
+    if page.get('type') == 'page':
+        ws_url = page.get('webSocketDebuggerUrl', '')
+        if ws_url:
+            if send_cdp_command(ws_url, 'Page.reload', {'ignoreCache': True}):
+                print('reloaded')
+                break
+" 2>/dev/null
+
+                if [ $? -eq 0 ]; then
+                    log "Page reload sent via Chrome DevTools Protocol"
+                    return 0
+                fi
+            fi
         fi
-    else
-        log "No debug URL available"
     fi
+
+    # Method 2: Fallback - signal process manager to restart browser
+    log "CDP refresh failed, falling back to process restart"
+    if send_hup_to_process_manager; then
+        log "Sent HUP signal to process manager"
+        return 0
+    fi
+
+    log "Could not refresh page"
+    return 1
 }
 
 # Handle connection lost

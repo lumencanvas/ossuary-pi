@@ -27,7 +27,7 @@
 - **First-run welcome page** — Shows setup instructions on the Pi's display until configured
 - **LumenCanvas first-class support** — WebGPU enabled, kiosk optimized, refresh behaviors built-in
 - **Captive portal configuration** — Configure WiFi and startup commands from any device
-- **Always-accessible control panel** — Web UI available at `hostname.local:8080` when connected
+- **Always-accessible control panel** — Web UI available at `hostname.local:8081` when connected
 - **Connection-aware behaviors** — Auto-refresh on reconnection, scheduled refreshes, connection monitoring
 - **Process management** — Keeps your kiosk app running with automatic restart on crash
 - **Chromium kiosk mode** — Pre-configured flags for password-store, crash recovery, and error suppression
@@ -52,7 +52,7 @@ cd ossuary-pi
 sudo ./install.sh
 ```
 
-The installer will configure everything and reboot. After reboot, access the control panel at `http://your-pi-hostname.local:8080`.
+The installer will configure everything and reboot. After reboot, access the control panel at `http://your-pi-hostname.local:8081`.
 
 ---
 
@@ -139,8 +139,8 @@ The installer will:
 ### Step 5: Configure Your Kiosk
 
 After reboot, access the control panel:
-- **URL**: `http://your-hostname.local:8080`
-- **Example**: `http://ossuary-kiosk.local:8080`
+- **URL**: `http://your-hostname.local:8081`
+- **Example**: `http://ossuary-kiosk.local:8081`
 
 <p align="center">
   <img src="screenshots/display-tab.png" alt="Display Configuration" width="500">
@@ -169,7 +169,7 @@ Select a preset or enter a custom command:
 1. On boot, Ossuary tries to connect to saved WiFi networks
 2. If connected: runs your startup command (Chromium kiosk, script, etc.)
 3. If disconnected: broadcasts "Ossuary-Setup" AP for reconfiguration
-4. Control panel always available at `http://hostname.local:8080`
+4. Control panel always available at `http://hostname.local:8081`
 
 ### Connection Events
 
@@ -188,7 +188,7 @@ When configured, Ossuary can:
   <img src="screenshots/wifi-tab.png" alt="WiFi Tab" width="500">
 </p>
 
-Access at `http://your-pi-hostname.local:8080` when connected to the same network.
+Access at `http://your-pi-hostname.local:8081` when connected to the same network.
 
 **Features:**
 - View system status and network info
@@ -258,7 +258,7 @@ Ossuary runs several systemd services:
 |---------|-------------|------|
 | `wifi-connect` | Balena WiFi Connect (AP mode) | 8080 (in AP) |
 | `wifi-connect-manager` | Manages WiFi/AP switching | — |
-| `ossuary-web` | Web configuration server | 8080 |
+| `ossuary-web` | Web configuration server | 8081 |
 | `ossuary-startup` | Process manager for user command | — |
 | `ossuary-connection-monitor` | Monitors connectivity & triggers behaviors | — |
 | `captive-portal-proxy` | Handles captive portal detection | 80 |
@@ -371,7 +371,7 @@ This removes all Ossuary services, scripts, and configuration while preserving N
 │  ├── Triggers refresh on reconnection                       │
 │  └── Handles scheduled refreshes                            │
 ├─────────────────────────────────────────────────────────────┤
-│  Config Server (port 8080)                                  │
+│  Config Server (port 8081)                                  │
 │  ├── Web UI for configuration                               │
 │  ├── REST API for settings                                  │
 │  └── WiFi network management                                │

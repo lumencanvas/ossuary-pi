@@ -335,8 +335,8 @@ EOF
     cat > /etc/systemd/system/ossuary-startup.service << EOF
 [Unit]
 Description=Ossuary Process Manager - Keeps User Command Running
-After=multi-user.target NetworkManager.service
-Wants=network-online.target
+After=multi-user.target NetworkManager.service ossuary-web.service
+Wants=network-online.target ossuary-web.service
 StartLimitIntervalSec=60
 StartLimitBurst=3
 
@@ -383,16 +383,18 @@ StandardError=journal
 WantedBy=multi-user.target
 EOF
 
-    # Web configuration service (ALWAYS on port 8080 to avoid conflicts)
+    # Web configuration service on port 8081 (separate from wifi-connect on 8080)
+    # This allows both to run simultaneously during AP mode
     cat > /etc/systemd/system/ossuary-web.service << EOF
 [Unit]
 Description=Ossuary Web Configuration Interface
-After=network-online.target
+After=network-online.target wifi-connect-manager.service
 Wants=network-online.target
+BindsTo=wifi-connect-manager.service
 
 [Service]
 Type=simple
-ExecStart=/usr/bin/python3 $INSTALL_DIR/scripts/config-server.py --port 8080
+ExecStart=/usr/bin/python3 $INSTALL_DIR/scripts/config-server.py --port 8081
 Restart=always
 RestartSec=10
 User=root
@@ -869,8 +871,8 @@ main() {
                 echo -e "${GREEN}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}"
                 echo ""
                 echo "When connected to your network:"
-                echo -e "  ${BLUE}http://${DEVICE_HOSTNAME}.local:8080${NC}"
-                echo "  http://${DEVICE_IP}:8080"
+                echo -e "  ${BLUE}http://${DEVICE_HOSTNAME}.local:8081${NC}"
+                echo "  http://${DEVICE_IP}:8081"
                 echo ""
                 echo "If no WiFi available:"
                 echo "  1. Connect to WiFi network: ${BLUE}Ossuary-Setup${NC}"
@@ -950,9 +952,9 @@ main() {
             echo -e "${GREEN}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}"
             echo ""
             echo "After reboot, when connected to your network:"
-            echo -e "  ${BLUE}http://${DEVICE_HOSTNAME}.local:8080${NC}"
+            echo -e "  ${BLUE}http://${DEVICE_HOSTNAME}.local:8081${NC}"
             if [ -n "$DEVICE_IP" ]; then
-                echo "  http://${DEVICE_IP}:8080"
+                echo "  http://${DEVICE_IP}:8081"
             fi
             echo ""
             echo "If no WiFi available:"
