@@ -490,14 +490,16 @@ perform_installation() {
             fi
         fi
 
-        # Disable SSH password warning popups (not needed for kiosk displays)
-        log "Disabling SSH warning notifications..."
-        rm -f /etc/profile.d/sshpwd.sh 2>/dev/null || true
-        rm -f /etc/xdg/lxsession/LXDE-pi/sshpwd.sh 2>/dev/null || true
-        # Also disable the piwiz first-run wizard if present
-        rm -f /etc/xdg/autostart/piwiz.desktop 2>/dev/null || true
-        success "SSH warnings disabled"
     fi
+
+    # Disable SSH password warning popups (not needed for kiosk displays)
+    # Run on all install modes since these files might reappear after OS updates
+    log "Disabling SSH warning notifications..."
+    rm -f /etc/profile.d/sshpwd.sh 2>/dev/null || true
+    rm -f /etc/xdg/lxsession/LXDE-pi/sshpwd.sh 2>/dev/null || true
+    # Also disable the piwiz first-run wizard if present
+    rm -f /etc/xdg/autostart/piwiz.desktop 2>/dev/null || true
+    success "SSH warnings disabled"
 
     # Step 2: Install/repair WiFi Connect
     if [ "$mode" -eq 2 ]; then
