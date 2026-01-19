@@ -1,0 +1,130 @@
+name: Build Raspberry Pi Image
+
+on:
+  push:
+    tags:
+      - 'v*'
+  workflow_dispatch:
+    inputs:
+      release:
+        description: 'Create a release'
+        required: false
+        default: 'false'
+        type: boolean
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Get version
+        id: version
+        run: |
+          if [[ "${{ github.ref }}" == refs/tags/* ]]; then
+            echo "version=${GITHUB_REF#refs/tags/}" >> $GITHUB_OUTPUT
+            echo "is_release=true" >> $GITHUB_OUTPUT
+          else
+            echo "version=dev-$(git rev-parse --short HEAD)" >> $GITHUB_OUTPUT
+            echo "is_release=${{ github.event.inputs.release }}" >> $GITHUB_OUTPUT
+          fi
+
+      - name: Copy repo files for pi-gen stage
+        run: |
+          mkdir -p stage-ossuary/00-install-ossuary/files/ossuary-pi
+          # Copy everything except the stage itself and git files
+          rsync -av --exclude='.git' --exclude='stage-ossuary' --exclude='.github' . stage-ossuary/00-install-ossuary/files/ossuary-pi/
+
+      - name: Build image
+        uses: usimd/pi-gen-action@v1
+        id: build
+        with:
+          image-name: ossuary-pi-${{ steps.version.outputs.version }}
+          stage-list: stage0 stage1 stage2 ./stage-ossuary
+
+          # Base image settings
+          release: bookworm
+          compression: zip
+          compression-level: 6
+
+          # System configuration (users can override with Pi Imager)
+          hostname: ossuary
+          username: pi
+          locale: en_US.UTF-8
+          keyboard-keymap: us
+          keyboard-layout: English (US)
+          timezone: Etc/UTC
+
+          # Enable SSH by default
+          enable-ssh: 1
+
+          # Build settings
+          enable-noobs: false
+          export-last-stage-only: true
+
+          # Increase disk space for build
+          increase-runner-disk-size: true
+
+      - name: List build output
+        run: |
+          echo "Build output:"
+          ls -la ${{ steps.build.outputs.image-path }} || true
+          ls -la pi-gen/deploy/ || true
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: ossuary-pi-image
+          path: ${{ steps.build.outputs.image-path }}
+          retention-days: 7
+
+      - name: Create Release
+        if: steps.version.outputs.is_release == 'true'
+        uses: softprops/action-gh-release@v1
+        with:
+          name: Ossuary Pi ${{ steps.version.outputs.version }}
+          body: |
+            ## Ossuary Pi ${{ steps.version.outputs.version }}
+
+            Pre-built Raspberry Pi image with Ossuary pre-installed.
+
+            ### Installation
+
+            1. Download `ossuary-pi-${{ steps.version.outputs.version }}.img.zip`
+            2. Open Raspberry Pi Imager
+            3. Choose OS → Use custom → Select the downloaded file
+            4. Configure your settings (hostname, WiFi, SSH) in Pi Imager
+            5. Write to SD card
+
+            ### First Boot
+
+            - If WiFi is configured: Access control panel at `http://your-hostname.local:8080`
+            - If no WiFi: Connect to "Ossuary-Setup" network and configure at `http://192.168.42.1`
+
+            ### Latest Release
+
+            Always get the latest version:
+            ```
+            https://github.com/lumencanvas/ossuary-pi/releases/latest/download/ossuary-pi.img.zip
+            ```
+          files: |
+            ${{ steps.build.outputs.image-path }}
+          fail_on_unmatched_files: false
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Rename for latest link
+        if: steps.version.outputs.is_release == 'true'
+        run: |
+          # Copy with generic name for stable "latest" URL
+          cp "${{ steps.build.outputs.image-path }}" "ossuary-pi.img.zip" || true
+
+      - name: Upload generic filename to release
+        if: steps.version.outputs.is_release == 'true'
+        uses: softprops/action-gh-release@v1
+        with:
+          files: ossuary-pi.img.zip
+          fail_on_unmatched_files: false
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

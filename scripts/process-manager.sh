@@ -25,16 +25,19 @@ log() {
 # Function to get command from config
 get_command() {
     if [ -f "$CONFIG_FILE" ]; then
-        # Extract startup_command from JSON
-        python3 -c "
+        # Extract startup_command from JSON, strip whitespace
+        local cmd=$(python3 -c "
 import json
 try:
     with open('$CONFIG_FILE', 'r') as f:
         config = json.load(f)
-        print(config.get('startup_command', ''))
+        cmd = config.get('startup_command', '') or ''
+        print(cmd.strip())
 except:
     pass
-"
+" 2>/dev/null)
+        # Return trimmed command (handles whitespace-only values)
+        echo "$cmd" | xargs 2>/dev/null || echo ""
     fi
 }
 
