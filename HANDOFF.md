@@ -220,10 +220,11 @@ The GitHub Actions workflow builds Pi images on:
 
 ## Known Issues / Tech Debt
 
-1. **No config encryption**: WiFi passwords stored in plaintext in config.json
-2. **No HTTPS**: Config server uses HTTP only
-3. **Schedule timezone**: Auto-detect uses system timezone but UI doesn't show what it detected
-4. **WebGPU on Pi 5**: May degrade performance - UI includes warning
+1. **Pi-gen build failing** - See `PI_GEN_BUILD_ISSUE.md` for full investigation notes
+2. **No config encryption**: WiFi passwords stored in plaintext in config.json
+3. **No HTTPS**: Config server uses HTTP only
+4. **Schedule timezone**: Auto-detect uses system timezone but UI doesn't show what it detected
+5. **WebGPU on Pi 5**: May degrade performance - UI includes warning
 
 ## Testing Checklist
 
