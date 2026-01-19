@@ -165,9 +165,6 @@ class ConfigHandler(SimpleHTTPRequestHandler):
                 self.handle_get_saved_networks()
             elif parsed_path.path == '/api/nearby-networks':
                 self.handle_get_nearby_networks()
-            # WiFi Connect compatible endpoints (always available)
-            elif parsed_path.path == '/networks':
-                self.handle_get_nearby_networks_compat()
             elif path_parts[0] == 'api' and path_parts[1] == 'logs':
                 if len(path_parts) > 2:
                     self.handle_get_logs(path_parts[2])
@@ -181,11 +178,13 @@ class ConfigHandler(SimpleHTTPRequestHandler):
             else:
                 self.send_json_response({'error': 'Not found'}, 404)
 
-        # Legacy endpoints for compatibility
+        # Legacy/WiFi Connect compatible endpoints
         elif parsed_path.path == '/startup':
             self.handle_get_startup()
         elif parsed_path.path == '/status':
             self.handle_status()
+        elif parsed_path.path == '/networks':
+            self.handle_get_nearby_networks_compat()
         else:
             # Serve static files
             return SimpleHTTPRequestHandler.do_GET(self)
