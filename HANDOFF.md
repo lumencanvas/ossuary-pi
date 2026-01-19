@@ -1,6 +1,6 @@
 # Ossuary Pi - Development Handoff
 
-*Last updated: 2026-01-18*
+*Last updated: 2026-01-19*
 
 ## Project Overview
 
@@ -12,12 +12,13 @@ Ossuary Pi is a kiosk system for Raspberry Pi, built primarily for LumenCanvas d
 ossuary-pi/
 ├── scripts/
 │   ├── process-manager.sh      # Main process manager (runs user command)
-│   ├── config-server.py        # Web UI backend (port 8080)
+│   ├── config-server.py        # Web UI backend (port 8081)
 │   ├── wifi-connect-manager.sh # Manages WiFi vs AP mode switching
 │   ├── connection-monitor.sh   # Monitors connectivity, triggers behaviors
 │   └── captive-portal-proxy.py # Handles captive portal detection (port 80)
 ├── custom-ui/
-│   └── index.html              # Single-file web UI (WiFi, Networks, Display, Schedule tabs)
+│   ├── index.html              # Main config UI (WiFi, Networks, Display, Control, Logs, Schedule)
+│   └── welcome.html            # First-run welcome page
 ├── stage-ossuary/              # pi-gen stage for pre-built images
 │   ├── prerun.sh
 │   ├── EXPORT_IMAGE
@@ -43,65 +44,73 @@ ossuary-pi/
 │  1. NetworkManager starts                                       │
 │  2. wifi-connect-manager checks for saved networks              │
 │     ├── Networks found → Connect to WiFi                        │
-│     └── No networks → Start wifi-connect (AP mode)              │
-│  3. ossuary-web starts (config server on :8080)                 │
+│     └── No networks → Start wifi-connect (AP mode on :8080)     │
+│  3. ossuary-web starts (config server on :8081)                 │
 │  4. ossuary-startup starts (process manager)                    │
-│     ├── No config → Show welcome page                           │
+│     ├── No config → Show welcome page in kiosk Chromium         │
 │     └── Has config → Run startup_command                        │
 │  5. ossuary-connection-monitor starts (watches connectivity)    │
-│  6. captive-portal-proxy starts (handles portal detection)      │
+│  6. captive-portal-proxy starts (handles portal detection :80)  │
 └─────────────────────────────────────────────────────────────────┘
 ```
+
+## Port Assignments
+
+| Port | Service | When Active |
+|------|---------|-------------|
+| 80 | captive-portal-proxy | Always (redirects to appropriate backend) |
+| 8080 | wifi-connect | AP mode only (no WiFi configured) |
+| 8081 | ossuary-web (config-server.py) | Always |
 
 ## Key Files Deep Dive
 
 ### scripts/process-manager.sh
 - **Purpose**: Keeps the user's configured command running
 - **Key functions**:
-  - `enhance_chromium_command()` - Adds kiosk flags, WebGPU, etc.
+  - `detect_display_server()` - Detects Wayland vs X11 (checks socket file, env vars, running compositors)
+  - `enhance_chromium_command()` - Adds kiosk flags, Wayland platform, GPU flags
   - `show_welcome_page()` - Displays setup instructions on first run
-  - `cleanup_chromium_state()` - Clears crash prompts before launch
+  - `prepare_chromium()` - Clears crash state before launch
   - `run_command()` - Executes command with process group management
-- **Critical fix applied**: `log()` function now redirects to stderr (`>&2`) to prevent stdout corruption in command substitution
 - **Signals**: SIGHUP triggers config reload, SIGTERM/SIGINT for graceful shutdown
+- **Wayland support**: Detects labwc/wayfire compositors, adds `--ozone-platform=wayland`
 
 ### scripts/config-server.py
 - **Purpose**: REST API and static file server for web UI
-- **Port**: 8080
+- **Port**: 8081 (default, configurable via `--port`)
 - **Key endpoints**:
   - `GET/POST /api/startup` - Startup command
   - `GET/POST /api/schedule` - Schedule rules
   - `GET/POST /api/saved-networks` - WiFi networks
-  - `GET /api/system/info` - Hostname, IP, etc.
+  - `GET /api/system/info` - Hostname, IP, config URLs
+  - `GET /api/process/status` - Process state (running/stopped/failed)
+  - `POST /api/process/start|stop|restart` - Process control
+  - `POST /api/startup/clear` - Clear startup command
+  - `GET /api/logs/{service}?lines=N` - Service logs
+  - `GET /api/screenshot` - Capture display screenshot
+  - `GET/POST /api/display/power` - Display on/off control
   - `POST /connect` - WiFi Connect compatible endpoint
   - `GET /networks` - Nearby WiFi scan
 - **Config file**: `/etc/ossuary/config.json`
 
 ### custom-ui/index.html
 - **Single HTML file** with embedded CSS and JS
-- **Tabs**: WiFi, Networks, Display, Schedule
+- **Tabs**: WiFi, Networks, Display, Control, Logs, Schedule
 - **Design**: Paper/ink aesthetic, Space Mono font, teal accent
 - **Features**:
   - WiFi scanning and connection
   - Saved networks management
   - Preset configs (LumenCanvas, Web Kiosk, Custom)
+  - **LumenCanvas preset**: Configurable Chromium flags (Wayland, WebGPU, Vulkan, GPU raster, etc.)
+  - **Control tab**: Start/Stop/Restart process, clear command, display power, screenshot
+  - **Logs tab**: View service logs (ossuary-process, ossuary-web, connection-monitor, wifi-connect)
   - Schedule rules with day picker
   - Timezone configuration
 
-### scripts/wifi-connect-manager.sh
-- **Purpose**: Decides when to run AP mode vs normal WiFi
-- **Logic**:
-  1. Check if any saved WiFi connections exist
-  2. If none, start wifi-connect (Balena WiFi Connect)
-  3. If connected, stop wifi-connect
-  4. Loop every 30 seconds
-
-### scripts/connection-monitor.sh
-- **Purpose**: Monitors connectivity and triggers behaviors
-- **Behaviors**:
-  - On connection lost: Show overlay (future)
-  - On connection regained: Refresh page via xdotool
-  - Scheduled refresh: At configured intervals
+### custom-ui/welcome.html
+- **Purpose**: First-run welcome page shown when no command configured
+- **Content**: Instructions to connect to Ossuary-Setup WiFi and configure
+- **Features**: Auto-refresh to detect when command is configured
 
 ## Configuration Schema
 
@@ -109,7 +118,8 @@ ossuary-pi/
 
 ```json
 {
-  "startup_command": "chromium --kiosk https://...",
+  "version": 2,
+  "startup_command": "XDG_RUNTIME_DIR=/run/user/1000 WAYLAND_DISPLAY=wayland-0 chromium --ozone-platform=wayland --kiosk ...",
   "saved_networks": [
     {
       "ssid": "NetworkName",
@@ -129,106 +139,107 @@ ossuary-pi/
   "schedule": {
     "enabled": false,
     "timezone": "auto",
-    "rules": [
-      {
-        "id": "rule-1",
-        "name": "Morning Refresh",
-        "enabled": true,
-        "trigger": {"type": "time", "time": "08:00", "days": ["mon","tue","wed","thu","fri"]},
-        "action": {"type": "refresh"}
-      }
-    ]
+    "rules": []
   }
 }
 ```
 
-## Recent Changes (This Session)
+## Recent Changes (2026-01-19)
+
+### New Features
+
+1. **Configurable Chromium Flags in UI** (`custom-ui/index.html`)
+   - LumenCanvas preset now has toggle switches for all flags:
+     - Display: Kiosk mode, auto-play media
+     - GPU: WebGPU (with Pi 5 warning), Vulkan, GPU rasterization
+     - Browser: Wayland mode, no first-run, disable translate/notifications/crash prompts, isolated profile
+   - Command preview textarea shows generated command
+   - Web Kiosk preset also updated with Wayland support
+
+2. **Control Tab** (`custom-ui/index.html`)
+   - Process status with live indicator (green/yellow/red)
+   - Start/Stop/Restart buttons
+   - Clear startup command button
+   - Display power on/off controls
+   - Screenshot capture and download
+   - Page refresh button
+
+3. **Logs Tab** (`custom-ui/index.html`)
+   - Service selector dropdown
+   - Configurable line count (50/100/500)
+   - Real-time log viewing from journalctl
+
+4. **New API Endpoints** (`scripts/config-server.py`)
+   - `GET /api/process/status` - Returns state, command, child PID
+   - `GET /api/logs/{service}?lines=N` - Fetch service logs
+   - Enhanced stop/start/restart with message responses
 
 ### Bug Fixes
 
-1. **log() function stdout corruption** (`scripts/process-manager.sh:15`)
-   - **Problem**: `log()` used `tee` which outputs to stdout. When called inside command substitution (`command=$(enhance_chromium_command "$cmd")`), log messages got captured and treated as part of the command, causing `bash: export: '[2026-01-18': not a valid identifier`
-   - **Fix**: Added `>&2` to redirect tee output to stderr
-   ```bash
-   # Before (broken)
-   log() { echo "[$(date)] $1" | tee -a "$LOG_FILE"; }
+1. **Wayland Detection** (`scripts/process-manager.sh`)
+   - Fixed false positive when only XDG_RUNTIME_DIR was set
+   - Now checks for Wayland socket file (`/run/user/{uid}/wayland-0`)
+   - Properly detects labwc compositor (Pi OS 2024+ default)
 
-   # After (fixed)
-   log() { echo "[$(date)] $1" | tee -a "$LOG_FILE" >&2; }
-   ```
+2. **Welcome Page Launch** (`scripts/process-manager.sh`)
+   - Fixed environment variable setup for Wayland
+   - Removed problematic single quotes from file:// URL
+   - Added `--no-first-run`, `--disable-default-apps`, `--disable-notifications` flags
+   - Uses correct user ID for XDG_RUNTIME_DIR
 
-2. **SSH warning disable scope** (`install.sh`)
-   - **Problem**: SSH warning removal only ran on fresh installs
-   - **Fix**: Moved outside the `if [ "$mode" -eq 0 ]` block to run on all install modes
+3. **Port Consistency**
+   - Fixed all references to use port 8081 for config server
+   - Updated: config-server.py, index.html, install.sh, check-status.sh
 
-### Feature Additions
+4. **Kiosk Flags**
+   - Removed `--start-maximized` (conflicts with `--kiosk`)
+   - Added isolated user data directory (`--user-data-dir=/home/pi/.config/chromium-kiosk`)
 
-1. **pi-gen image builds** (`.github/workflows/build-image.yml`, `stage-ossuary/`)
-   - GitHub Actions workflow builds Pi images on tag push
-   - Creates versioned AND generic filename for stable "latest" URL
-   - pi-gen stage copies repo and creates all systemd services
+### Package Updates
 
-2. **UI loads existing config** (`custom-ui/index.html`)
-   - `loadCurrentConfig()` fetches startup command on page load
-   - `parseAndPopulateForms()` extracts URL/flags and populates forms
-   - Visual "ACTIVE" badge shows which preset matches current config
-   - Display tab refreshes config when switched to
-
-3. **README updates**
-   - Changed `chromium-browser` to `chromium` (correct command on modern Pi OS)
-
-### Documentation
-
-1. **MULTI_PROCESS_PLAN.md** - Architecture plan for multiple processes feature
-   - Config schema v3 with named processes
-   - One Chromium at a time with display selection
-   - Unlimited background processes
-   - New API endpoints
-   - Schedule integration
-   - Migration path from v1/v2
-
-## Known Issues / Tech Debt
-
-1. **Port 8080 sharing**: Both wifi-connect and ossuary-web use port 8080. They're mutually exclusive (wifi-connect runs in AP mode, ossuary-web when connected), but could cause confusion.
-
-2. **No config encryption**: WiFi passwords stored in plaintext in config.json.
-
-3. **Welcome page detection**: Currently checks if `startup_command` is empty. Could be more robust.
-
-4. **xdotool for refresh**: Uses keyboard simulation (F5) which is fragile. Could use Chrome DevTools Protocol instead.
-
-5. **No process output streaming**: Test command output requires polling. Could use WebSocket.
-
-6. **Schedule timezone**: Auto-detect uses system timezone but UI doesn't show what it detected.
-
-## Testing Checklist
-
-- [ ] Fresh install on clean Pi OS
-- [ ] Upgrade from previous version
-- [ ] AP mode activates when no WiFi configured
-- [ ] WiFi connection from captive portal
-- [ ] Startup command runs after config
-- [ ] Process auto-restarts on crash
-- [ ] Web UI accessible at hostname.local:8080
-- [ ] Schedule rules execute at correct times
-- [ ] Connection monitor triggers refresh on reconnect
-- [ ] pi-gen image builds successfully
-- [ ] Pi Imager settings (hostname, WiFi) work with pre-built image
-
-## Pending Work
-
-1. **Push current changes** (waiting for user approval)
-2. **Test log() fix** on actual Pi hardware
-3. **Implement multiple processes feature** (see MULTI_PROCESS_PLAN.md)
-4. **Add screenshots** for new Display tab active indicator
+- Changed `chromium-browser` to `chromium` in `stage-ossuary/00-install-ossuary/00-packages` (correct package name for Pi OS Trixie/Debian 13)
 
 ## Environment
 
-- **Target OS**: Raspberry Pi OS Bookworm (2024) or Trixie (2025+)
+- **Target OS**: Raspberry Pi OS Trixie (2026) - Debian 13
+- **Display Server**: Wayland with labwc compositor (default), X11 fallback
 - **Python**: 3.9+ (no external dependencies)
-- **Browser**: Chromium (not chromium-browser)
+- **Browser**: Chromium (package name: `chromium`)
 - **WiFi**: NetworkManager (not wpa_supplicant)
-- **Display**: X11 (Wayland support via XWayland)
+
+## pi-gen Build
+
+The GitHub Actions workflow builds Pi images on:
+- Tag push (`v*`)
+- Manual workflow dispatch
+
+**Image features**:
+- Based on RPi-Distro/pi-gen with Trixie release
+- All Ossuary services pre-installed and enabled
+- Pi Imager settings (hostname, WiFi, SSH) work correctly
+
+## Known Issues / Tech Debt
+
+1. **No config encryption**: WiFi passwords stored in plaintext in config.json
+2. **No HTTPS**: Config server uses HTTP only
+3. **Schedule timezone**: Auto-detect uses system timezone but UI doesn't show what it detected
+4. **WebGPU on Pi 5**: May degrade performance - UI includes warning
+
+## Testing Checklist
+
+- [ ] Fresh install on clean Pi OS Trixie
+- [ ] Upgrade from previous version
+- [ ] AP mode activates when no WiFi configured
+- [ ] WiFi connection from captive portal
+- [ ] Welcome page shows on first boot (no command)
+- [ ] Startup command runs after config
+- [ ] Process auto-restarts on crash
+- [ ] Web UI accessible at hostname.local:8081
+- [ ] Control tab: start/stop/restart work
+- [ ] Logs tab: shows service logs
+- [ ] LumenCanvas preset generates correct Wayland command
+- [ ] Schedule rules execute at correct times
+- [ ] pi-gen image builds successfully
 
 ## Useful Commands
 
@@ -247,53 +258,12 @@ sudo systemctl restart ossuary-startup
 sudo systemctl start wifi-connect
 
 # Test config server
-curl http://localhost:8080/api/status
+curl http://localhost:8081/api/status
+curl http://localhost:8081/api/process/status
 
-# Build pi-gen image locally (requires Docker)
-# Usually done via GitHub Actions instead
+# View logs via API
+curl "http://localhost:8081/api/logs/ossuary-process?lines=50"
 ```
-
-## Security Audit Summary (2026-01-18)
-
-### Critical Issues (5)
-
-| Issue | File | Lines | Description |
-|-------|------|-------|-------------|
-| Command Injection | process-manager.sh | 29-40, 340-346 | Unquoted vars in Python heredoc allow shell escape |
-| Shell Injection in Wrapper | process-manager.sh | 350-400 | Unquoted `$extra_env` and `$clean_command` in heredoc |
-| RCE via Test Command | config-server.py | 454-460 | `shell=True` with user input from POST `/api/test-command` |
-| Plaintext Passwords | config-server.py | 815, 1068 | WiFi passwords stored unencrypted in config.json |
-| Proxy Path Traversal | captive-portal-proxy.py | 116, 132-133 | No size/content validation on proxied requests |
-
-### High Issues (8)
-
-- Missing error checking in wifi-connect-manager.sh (nmcli failures)
-- Race condition in PID management (process-manager.sh:407-413)
-- File descriptor leak in test processes (config-server.py:452-470)
-- Missing null checks in JSON parsing (connection-monitor.sh)
-- No timeout on reboot subprocess (config-server.py:663)
-- Service dependency ordering incomplete (00-run-chroot.sh)
-- Timezone injection potential (config-server.py:754)
-- Update mode skips dependencies (install.sh:445-493)
-
-### Medium Issues (10)
-
-- Glob pattern too broad for pkill
-- Hardcoded ports without fallback
-- Shallow config merge overwrites subtrees
-- Missing HTTPS support
-- Inconsistent HTTP status codes
-- Missing schema validation
-
-### Recommended Priority Fixes
-
-1. **Immediate**: Quote all variables in shell heredocs
-2. **Immediate**: Add `shlex.quote()` to config-server.py test command
-3. **Soon**: Encrypt WiFi passwords with `cryptography` library
-4. **Soon**: Add JSON schema validation
-5. **Later**: Implement HTTPS with self-signed certs
-
-Full audit details: See audit notes above.
 
 ---
 

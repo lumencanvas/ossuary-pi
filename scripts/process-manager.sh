@@ -149,10 +149,6 @@ enhance_chromium_command() {
             enhanced=$(echo "$enhanced" | sed 's/chromium\(-browser\)\?/& --ozone-platform=wayland/')
             log "Added Wayland ozone platform flag"
         fi
-        # Also add start-maximized for better fullscreen on Wayland
-        if echo "$command" | grep -q "\-\-kiosk" && ! echo "$command" | grep -q "start-maximized"; then
-            enhanced=$(echo "$enhanced" | sed 's/chromium\(-browser\)\?/& --start-maximized/')
-        fi
     fi
 
     echo "$enhanced"
@@ -160,15 +156,28 @@ enhance_chromium_command() {
 
 # Function to detect display server type
 detect_display_server() {
-    # Check XDG_SESSION_TYPE first (most reliable on Pi OS 2025)
+    # Check XDG_SESSION_TYPE first (most reliable on Pi OS 2025+)
     if [ -n "$XDG_SESSION_TYPE" ]; then
         case "$XDG_SESSION_TYPE" in
             "wayland"|"x11") echo "$XDG_SESSION_TYPE"; return ;;
         esac
     fi
 
-    # Check for Wayland (Pi OS 2025 uses Wayfire by default)
-    if [ -n "$WAYLAND_DISPLAY" ] || [ -n "$XDG_RUNTIME_DIR" ]; then
+    # Check for Wayland socket file (most reliable runtime check)
+    local user_id
+    if id "pi" &>/dev/null; then
+        user_id=$(id -u pi)
+    else
+        user_id=$(id -u)
+    fi
+
+    if [ -S "/run/user/${user_id}/wayland-0" ]; then
+        echo "wayland"
+        return
+    fi
+
+    # Check WAYLAND_DISPLAY environment variable
+    if [ -n "$WAYLAND_DISPLAY" ]; then
         echo "wayland"
         return
     fi
@@ -179,22 +188,22 @@ detect_display_server() {
         return
     fi
 
-    # Try to detect from running processes (Pi OS 2025 specific)
-    if pgrep -x "Xorg" > /dev/null || pgrep -x "X" > /dev/null; then
-        echo "x11"
+    # Pi OS Wayland compositors (labwc is default in 2024+, wayfire was 2023-2024)
+    if pgrep -x "labwc" > /dev/null || pgrep -x "wayfire" > /dev/null || pgrep -x "weston" > /dev/null || pgrep -x "sway" > /dev/null; then
+        echo "wayland"
         return
     fi
 
-    # Pi OS Wayland compositors (labwc is default in late 2024+, wayfire was 2023-2024)
-    if pgrep -x "labwc" > /dev/null || pgrep -x "wayfire" > /dev/null || pgrep -x "weston" > /dev/null || pgrep -x "sway" > /dev/null; then
-        echo "wayland"
+    # Try to detect from running processes for X11
+    if pgrep -x "Xorg" > /dev/null || pgrep -x "X" > /dev/null; then
+        echo "x11"
         return
     fi
 
     # Check systemctl for display manager (modern approach)
     if systemctl is-active --quiet gdm3 || systemctl is-active --quiet lightdm; then
         # If display manager is running, likely has a display server
-        if [ -S "/run/user/$(id -u)/wayland-0" ] 2>/dev/null; then
+        if [ -S "/run/user/${user_id}/wayland-0" ]; then
             echo "wayland"
         else
             echo "x11"
@@ -681,22 +690,27 @@ show_welcome_page() {
     # Launch Chromium with welcome page in kiosk mode
     # Detect display type for proper flags
     local display_type=$(detect_display_server)
-    local wayland_flags=""
+    local platform_flags=""
+    local env_exports=""
+
+    # Get the correct user ID for XDG_RUNTIME_DIR
+    local run_user_id=$(id -u "$run_user" 2>/dev/null || echo "1000")
+
     if [ "$display_type" = "wayland" ]; then
-        wayland_flags="--ozone-platform=wayland --start-maximized"
+        platform_flags="--ozone-platform=wayland"
+        env_exports="export WAYLAND_DISPLAY='wayland-0'; export XDG_RUNTIME_DIR='/run/user/${run_user_id}'; export XDG_SESSION_TYPE='wayland';"
+        log "Using Wayland display mode"
+    else
+        env_exports="export DISPLAY='${DISPLAY:-:0}'; export XAUTHORITY='${HOME}/.Xauthority';"
+        log "Using X11 display mode"
     fi
 
-    local chromium_cmd="chromium --kiosk --password-store=basic --disable-session-crashed-bubble --disable-infobars --noerrdialogs --use-gl=egl --check-for-update-interval=31536000 $wayland_flags file://${WELCOME_PAGE}"
+    local chromium_cmd="chromium --kiosk --password-store=basic --disable-session-crashed-bubble --disable-infobars --noerrdialogs --no-first-run --disable-default-apps --disable-notifications --use-gl=egl --user-data-dir=/home/${run_user}/.config/chromium-kiosk --check-for-update-interval=31536000 $platform_flags file://${WELCOME_PAGE}"
 
     log "Launching welcome page: $chromium_cmd"
 
-    # Run as the appropriate user
-    su "$run_user" -c "export DISPLAY='${DISPLAY:-:0}'; \
-        export XAUTHORITY='${HOME}/.Xauthority'; \
-        export HOME='${HOME}'; \
-        export WAYLAND_DISPLAY='${WAYLAND_DISPLAY:-wayland-0}'; \
-        export XDG_RUNTIME_DIR='${XDG_RUNTIME_DIR:-/run/user/1000}'; \
-        $chromium_cmd" >> "$LOG_FILE" 2>&1 &
+    # Run as the appropriate user with correct environment
+    su "$run_user" -c "${env_exports} export HOME='${HOME}'; $chromium_cmd" >> "$LOG_FILE" 2>&1 &
 
     WELCOME_PID=$!
     echo $WELCOME_PID > "${PID_FILE}.welcome"
@@ -719,12 +733,7 @@ show_welcome_page() {
             local wpid=$(cat "${PID_FILE}.welcome")
             if ! kill -0 "$wpid" 2>/dev/null; then
                 log "Welcome browser died, restarting..."
-                su "$run_user" -c "export DISPLAY='${DISPLAY:-:0}'; \
-                    export XAUTHORITY='${HOME}/.Xauthority'; \
-                    export HOME='${HOME}'; \
-                    export WAYLAND_DISPLAY='${WAYLAND_DISPLAY:-wayland-0}'; \
-                    export XDG_RUNTIME_DIR='${XDG_RUNTIME_DIR:-/run/user/1000}'; \
-                    $chromium_cmd" >> "$LOG_FILE" 2>&1 &
+                su "$run_user" -c "${env_exports} export HOME='${HOME}'; $chromium_cmd" >> "$LOG_FILE" 2>&1 &
                 WELCOME_PID=$!
                 echo $WELCOME_PID > "${PID_FILE}.welcome"
             fi

@@ -774,7 +774,7 @@ main() {
             echo -e "${BLUE}After reboot:${NC}"
             echo "  • Look for 'Ossuary-Setup' WiFi network if no WiFi found"
             echo "  • Or SSH back in using the same IP address"
-            echo "  • Access config at http://$(hostname).local:8080"
+            echo "  • Access config at http://$(hostname).local:8081"
         else
             # Update/repair - lighter warning
             echo ""
@@ -851,7 +851,7 @@ main() {
                 fi
 
                 if systemctl is-active --quiet ossuary-web; then
-                    echo -e "  ${GREEN}✓${NC} Web config server - Running on port 8080"
+                    echo -e "  ${GREEN}✓${NC} Web config server - Running on port 8081"
                 else
                     echo -e "  ${RED}✗${NC} Web config server - Not running (run: sudo systemctl start ossuary-web)"
                 fi

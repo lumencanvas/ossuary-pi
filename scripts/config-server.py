@@ -1,7 +1,8 @@
 #!/usr/bin/env python3
 """
 Enhanced config server for Ossuary Pi with full service management
-Runs on port 8080 to provide persistent configuration interface
+Runs on port 8081 to provide persistent configuration interface
+(WiFi Connect uses port 8080 during AP mode setup)
 Compatible with Python 3.9+ (Pi OS Bullseye through Trixie)
 """
 
@@ -219,6 +220,8 @@ class ConfigHandler(SimpleHTTPRequestHandler):
                 self.handle_screenshot()
             elif parsed_path.path == '/api/display/power':
                 self.handle_get_display_power()
+            elif parsed_path.path == '/api/process/status':
+                self.handle_get_process_status()
             else:
                 self.send_json_response({'error': 'Not found'}, 404)
 
@@ -434,41 +437,54 @@ class ConfigHandler(SimpleHTTPRequestHandler):
             self.send_json_response({'error': str(e)}, 500)
 
     def handle_get_logs(self, log_type):
-        """Get log content"""
+        """Get log content for a service"""
         try:
+            # Parse query string for lines parameter
+            parsed_path = urlparse(self.path)
+            query = parse_qs(parsed_path.query)
+            lines = int(query.get('lines', ['50'])[0])
+            lines = min(max(lines, 10), 1000)  # Clamp between 10-1000
+
             logs = ""
 
-            if log_type == 'process':
-                # Get process manager logs
-                log_file = '/var/log/ossuary-process.log'
-                if os.path.exists(log_file):
-                    # Get last 100 lines
-                    result = subprocess.run(
-                        ['tail', '-n', '100', log_file],
-                        capture_output=True, text=True, timeout=2
-                    )
-                    logs = result.stdout
+            # Map service names to journalctl units or log files
+            service_map = {
+                'ossuary-process': {'unit': 'ossuary-startup', 'file': '/var/log/ossuary-process.log'},
+                'ossuary-web': {'unit': 'ossuary-web'},
+                'ossuary-connection-monitor': {'unit': 'ossuary-connection-monitor'},
+                'wifi-connect': {'unit': 'wifi-connect'},
+                # Legacy names
+                'process': {'unit': 'ossuary-startup', 'file': '/var/log/ossuary-process.log'},
+                'wifi': {'unit': 'wifi-connect'},
+                'system': {'units': ['ossuary-startup', 'ossuary-web']}
+            }
+
+            if log_type not in service_map:
+                self.send_json_response({'error': f'Unknown service: {log_type}'}, 400)
+                return
+
+            config = service_map[log_type]
+
+            # Try log file first if specified
+            if 'file' in config and os.path.exists(config['file']):
+                result = subprocess.run(
+                    ['tail', '-n', str(lines), config['file']],
+                    capture_output=True, text=True, timeout=5
+                )
+                logs = result.stdout
+
+            # Fall back to journalctl
+            if not logs:
+                if 'units' in config:
+                    # Multiple units
+                    cmd = ['journalctl', '-n', str(lines), '--no-pager']
+                    for unit in config['units']:
+                        cmd.extend(['-u', unit])
                 else:
-                    logs = "No process logs available"
+                    cmd = ['journalctl', '-u', config['unit'], '-n', str(lines), '--no-pager']
 
-            elif log_type == 'wifi':
-                # Get WiFi Connect logs
-                result = subprocess.run(
-                    ['journalctl', '-u', 'wifi-connect', '-n', '50', '--no-pager'],
-                    capture_output=True, text=True, timeout=2
-                )
-                logs = result.stdout or "No WiFi Connect logs available"
-
-            elif log_type == 'system':
-                # Get system logs
-                result = subprocess.run(
-                    ['journalctl', '-u', 'ossuary-startup', '-u', 'ossuary-web', '-n', '50', '--no-pager'],
-                    capture_output=True, text=True, timeout=2
-                )
-                logs = result.stdout or "No system logs available"
-
-            else:
-                logs = f"Unknown log type: {log_type}"
+                result = subprocess.run(cmd, capture_output=True, text=True, timeout=10)
+                logs = result.stdout or f"No logs available for {log_type}"
 
             self.send_json_response({'logs': logs})
         except Exception as e:
@@ -695,8 +711,8 @@ class ConfigHandler(SimpleHTTPRequestHandler):
                 'hostname': hostname,
                 'hostname_local': f"{hostname}.local",
                 'ip': ip,
-                'config_url': f"http://{hostname}.local:8080",
-                'config_url_ip': f"http://{ip}:8080" if ip else None
+                'config_url': f"http://{hostname}.local:8081",
+                'config_url_ip': f"http://{ip}:8081" if ip else None
             }
             self.send_json_response(info)
         except Exception as e:
@@ -726,6 +742,7 @@ class ConfigHandler(SimpleHTTPRequestHandler):
             )
             self.send_json_response({
                 'success': result.returncode == 0,
+                'message': 'Process restarted' if result.returncode == 0 else 'Failed to restart',
                 'output': result.stdout + result.stderr
             })
         except Exception as e:
@@ -749,6 +766,7 @@ class ConfigHandler(SimpleHTTPRequestHandler):
                 )
                 self.send_json_response({
                     'success': result.returncode == 0,
+                    'message': 'Process stopped' if result.returncode == 0 else 'Failed to stop',
                     'output': result.stdout + result.stderr
                 })
         except Exception as e:
@@ -763,7 +781,60 @@ class ConfigHandler(SimpleHTTPRequestHandler):
             )
             self.send_json_response({
                 'success': result.returncode == 0,
+                'message': 'Process started' if result.returncode == 0 else 'Failed to start',
                 'output': result.stdout + result.stderr
+            })
+        except Exception as e:
+            self.send_json_response({'error': str(e)}, 500)
+
+    def handle_get_process_status(self):
+        """Get current process status"""
+        try:
+            # Get service state
+            result = subprocess.run(
+                ['systemctl', 'show', 'ossuary-startup', '--property=ActiveState,SubState'],
+                capture_output=True, text=True, timeout=5
+            )
+
+            state = 'unknown'
+            substate = ''
+            if result.returncode == 0:
+                for line in result.stdout.strip().split('\n'):
+                    if '=' in line:
+                        key, value = line.split('=', 1)
+                        if key == 'ActiveState':
+                            state = value
+                        elif key == 'SubState':
+                            substate = value
+
+            # Get current command from config
+            command = ''
+            try:
+                if os.path.exists(CONFIG_FILE):
+                    with open(CONFIG_FILE, 'r') as f:
+                        config = json.load(f)
+                        command = config.get('startup_command', '')
+            except:
+                pass
+
+            # Check if child process is running
+            child_pid = None
+            try:
+                child_pid_file = '/run/ossuary/process.pid.child'
+                if os.path.exists(child_pid_file):
+                    with open(child_pid_file, 'r') as f:
+                        child_pid = int(f.read().strip())
+                    # Verify process exists
+                    os.kill(child_pid, 0)
+            except:
+                child_pid = None
+
+            self.send_json_response({
+                'state': state,
+                'substate': substate,
+                'command': command,
+                'child_pid': child_pid,
+                'running': state == 'active' and child_pid is not None
             })
         except Exception as e:
             self.send_json_response({'error': str(e)}, 500)
@@ -1352,7 +1423,7 @@ def cleanup_test_processes():
 
 def run_server():
     # Check for port argument
-    port = 8080  # Default port to avoid conflict with WiFi Connect
+    port = 8081  # Default port (WiFi Connect uses 8080 in AP mode)
     if len(sys.argv) > 1:
         for arg in sys.argv[1:]:
             if arg.startswith('--port'):

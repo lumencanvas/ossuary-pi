@@ -351,6 +351,8 @@
             <button class="tab active" onclick="switchTab('wifi')">WiFi</button>
             <button class="tab" onclick="switchTab('networks')">Networks</button>
             <button class="tab" onclick="switchTab('display')">Display</button>
+            <button class="tab" onclick="switchTab('control')">Control</button>
+            <button class="tab" onclick="switchTab('logs')">Logs</button>
             <button class="tab" onclick="switchTab('schedule')">Schedule</button>
         </div>
 
@@ -459,15 +461,43 @@
                 <h4>LumenCanvas Configuration</h4>
                 <div class="input-group">
                     <label for="lc-url">Canvas URL or ID</label>
-                    <input type="text" id="lc-url" placeholder="https://lumencanvas.studio/canvas/abc123">
+                    <input type="text" id="lc-url" placeholder="https://lumencanvas.studio/projector/proj_xxx">
                 </div>
-                <p class="section-label">Display Options</p>
+
+                <p class="section-label">Display Mode</p>
                 <div class="checkbox-group">
-                    <div class="checkbox-item"><input type="checkbox" id="lc-kiosk" checked><label for="lc-kiosk">Kiosk mode</label></div>
-                    <div class="checkbox-item"><input type="checkbox" id="lc-webgpu" checked><label for="lc-webgpu">WebGPU acceleration</label></div>
-                    <div class="checkbox-item"><input type="checkbox" id="lc-autoplay" checked><label for="lc-autoplay">Auto-play media</label></div>
+                    <div class="checkbox-item"><input type="checkbox" id="lc-kiosk" checked><label for="lc-kiosk">Kiosk mode (fullscreen, no browser UI)</label></div>
+                    <div class="checkbox-item"><input type="checkbox" id="lc-autoplay" checked><label for="lc-autoplay">Auto-play media without user gesture</label></div>
                 </div>
+
+                <p class="section-label">GPU & Rendering</p>
+                <div class="info-box" style="margin-top: 0; margin-bottom: var(--space-md); border-color: var(--warning);">
+                    <h3 style="color: var(--warning);">Pi 5 Note</h3>
+                    <p>WebGPU may degrade performance on Raspberry Pi 5. Most LumenCanvas shaders work without WebGPU. Try disabling if you experience issues. We're actively improving Pi 5 support.</p>
+                </div>
+                <div class="checkbox-group">
+                    <div class="checkbox-item"><input type="checkbox" id="lc-webgpu"><label for="lc-webgpu">Enable WebGPU (experimental, may reduce performance on Pi 5)</label></div>
+                    <div class="checkbox-item"><input type="checkbox" id="lc-vulkan" checked><label for="lc-vulkan">Enable Vulkan renderer</label></div>
+                    <div class="checkbox-item"><input type="checkbox" id="lc-gpu-raster" checked><label for="lc-gpu-raster">GPU rasterization</label></div>
+                </div>
+
+                <p class="section-label">Browser Behavior</p>
+                <div class="checkbox-group">
+                    <div class="checkbox-item"><input type="checkbox" id="lc-wayland" checked><label for="lc-wayland">Wayland mode (required for Pi OS 2024+)</label></div>
+                    <div class="checkbox-item"><input type="checkbox" id="lc-no-first-run" checked><label for="lc-no-first-run">Skip first-run wizard</label></div>
+                    <div class="checkbox-item"><input type="checkbox" id="lc-disable-translate" checked><label for="lc-disable-translate">Disable translate prompts</label></div>
+                    <div class="checkbox-item"><input type="checkbox" id="lc-disable-notifications" checked><label for="lc-disable-notifications">Disable notifications</label></div>
+                    <div class="checkbox-item"><input type="checkbox" id="lc-disable-crash-bubble" checked><label for="lc-disable-crash-bubble">Disable crash/restore prompts</label></div>
+                    <div class="checkbox-item"><input type="checkbox" id="lc-separate-profile" checked><label for="lc-separate-profile">Use isolated kiosk profile</label></div>
+                </div>
+
+                <div class="input-group" style="margin-top: var(--space-lg);">
+                    <label>Command Preview</label>
+                    <textarea id="lc-command-preview" readonly style="min-height: 60px; font-size: 11px; background: var(--paper-dark);"></textarea>
+                </div>
+
                 <button class="btn-primary" onclick="saveLumenCanvasConfig()">Save & Apply</button>
+                <button class="btn-secondary" onclick="updateLcCommandPreview()">Preview Command</button>
             </div>
 
             <div id="webgpu-config" class="config-panel">
@@ -477,9 +507,12 @@
                     <label for="web-url">Website URL</label>
                     <input type="text" id="web-url" placeholder="https://example.com">
                 </div>
+                <p class="section-label">Display Options</p>
                 <div class="checkbox-group">
-                    <div class="checkbox-item"><input type="checkbox" id="web-kiosk" checked><label for="web-kiosk">Kiosk mode</label></div>
-                    <div class="checkbox-item"><input type="checkbox" id="web-webgpu" checked><label for="web-webgpu">WebGPU acceleration</label></div>
+                    <div class="checkbox-item"><input type="checkbox" id="web-kiosk" checked><label for="web-kiosk">Kiosk mode (fullscreen)</label></div>
+                    <div class="checkbox-item"><input type="checkbox" id="web-wayland" checked><label for="web-wayland">Wayland mode (Pi OS 2024+)</label></div>
+                    <div class="checkbox-item"><input type="checkbox" id="web-webgpu"><label for="web-webgpu">WebGPU acceleration</label></div>
+                    <div class="checkbox-item"><input type="checkbox" id="web-separate-profile" checked><label for="web-separate-profile">Use isolated kiosk profile</label></div>
                 </div>
                 <button class="btn-primary" onclick="saveWebKioskConfig()">Save & Apply</button>
             </div>
@@ -492,6 +525,91 @@
                     <textarea id="startup-cmd" placeholder="DISPLAY=:0 chromium --kiosk https://example.com"></textarea>
                 </div>
                 <button class="btn-primary" onclick="saveCustomCommand()">Save & Apply</button>
+            </div>
+        </div>
+
+        <!-- Control Tab -->
+        <div id="control-tab" class="tab-content">
+            <div id="control-message" class="message"></div>
+
+            <p class="section-label">Process Status</p>
+            <div id="process-status" class="info-box" style="margin-bottom: var(--space-lg);">
+                <div style="display: flex; justify-content: space-between; align-items: center;">
+                    <div>
+                        <div class="timezone-label">Current Status</div>
+                        <div class="timezone-value" id="process-state">Loading...</div>
+                    </div>
+                    <div id="process-indicator" style="width: 12px; height: 12px; border-radius: 50%; background: var(--ink-muted);"></div>
+                </div>
+                <div id="process-command-display" style="margin-top: var(--space-md); font-size: 11px; color: var(--ink-muted); word-break: break-all;"></div>
+            </div>
+
+            <p class="section-label">Process Control</p>
+            <div style="display: flex; gap: var(--space-sm); margin-bottom: var(--space-lg);">
+                <button class="btn-primary" style="flex: 1;" onclick="controlProcess('start')" id="btn-start">Start</button>
+                <button class="btn-secondary" style="flex: 1; margin-top: 0;" onclick="controlProcess('stop')" id="btn-stop">Stop</button>
+                <button class="btn-secondary" style="flex: 1; margin-top: 0;" onclick="controlProcess('restart')" id="btn-restart">Restart</button>
+            </div>
+
+            <p class="section-label">Startup Command</p>
+            <div id="current-command-box" class="info-box" style="margin-bottom: var(--space-md);">
+                <div id="current-command-text" style="font-family: 'IBM Plex Mono', monospace; font-size: 11px; word-break: break-all;">No command set</div>
+            </div>
+            <button class="btn-secondary" style="margin-top: 0; border-color: var(--error); color: var(--error);" onclick="clearStartupCommand()">Clear Startup Command</button>
+
+            <div class="info-box" style="margin-top: var(--space-lg);">
+                <h3>Display Control</h3>
+                <p style="margin-bottom: var(--space-sm);">Turn the display on or off to save power.</p>
+                <div style="display: flex; gap: var(--space-sm);">
+                    <button class="btn-small" onclick="setDisplayPower(true)">Display On</button>
+                    <button class="btn-small" onclick="setDisplayPower(false)">Display Off</button>
+                    <button class="btn-small" onclick="takeScreenshot()">Screenshot</button>
+                </div>
+            </div>
+
+            <div class="info-box" style="margin-top: var(--space-md);">
+                <h3>Page Refresh</h3>
+                <p style="margin-bottom: var(--space-sm);">Refresh the browser page without restarting the process.</p>
+                <button class="btn-small" onclick="refreshPage()">Refresh Page</button>
+            </div>
+        </div>
+
+        <!-- Logs Tab -->
+        <div id="logs-tab" class="tab-content">
+            <p class="section-label">Service Logs</p>
+            <div class="input-group">
+                <label for="log-service">Select Service</label>
+                <select id="log-service" onchange="loadLogs()">
+                    <option value="ossuary-process">Kiosk Process</option>
+                    <option value="ossuary-web">Config Server</option>
+                    <option value="ossuary-connection-monitor">Connection Monitor</option>
+                    <option value="wifi-connect">WiFi Connect</option>
+                </select>
+            </div>
+
+            <div style="display: flex; gap: var(--space-sm); margin-bottom: var(--space-md);">
+                <button class="btn-small" onclick="loadLogs()">Refresh</button>
+                <button class="btn-small" onclick="loadLogs(100)">Last 100</button>
+                <button class="btn-small" onclick="loadLogs(500)">Last 500</button>
+                <button class="btn-small" onclick="clearLogDisplay()">Clear</button>
+            </div>
+
+            <div id="log-output" style="
+                background: var(--ink);
+                color: var(--teal-light);
+                font-family: 'IBM Plex Mono', monospace;
+                font-size: 11px;
+                padding: var(--space-md);
+                max-height: 400px;
+                overflow-y: auto;
+                white-space: pre-wrap;
+                word-break: break-all;
+                border: 1px solid var(--border);
+            ">Select a service and click Refresh to view logs...</div>
+
+            <div class="info-box" style="margin-top: var(--space-lg);">
+                <h3>Log Viewer</h3>
+                <p>View real-time logs from system services. Logs are fetched from journalctl.</p>
             </div>
         </div>
 
@@ -661,13 +779,21 @@
             if (!command) return;
 
             // Extract URL from command (look for quoted URL or URL at end)
-            const urlMatch = command.match(/"([^"]+)"/) || command.match(/https?:\/\/[^\s"]+/);
+            const urlMatch = command.match(/"([^"]+)"/) || command.match(/'([^']+)'/) || command.match(/https?:\/\/[^\s"']+/);
             const url = urlMatch ? (urlMatch[1] || urlMatch[0]) : '';
 
-            // Detect flags
+            // Detect common flags
             const hasKiosk = command.includes('--kiosk');
-            const hasWebGPU = command.includes('--enable-features=') && command.includes('WebGPU');
+            const hasWebGPU = command.includes('WebGPU');
             const hasAutoplay = command.includes('--autoplay-policy=no-user-gesture-required');
+            const hasWayland = command.includes('--ozone-platform=wayland') || command.includes('WAYLAND_DISPLAY');
+            const hasVulkan = command.includes('Vulkan');
+            const hasGpuRaster = command.includes('gpu-rasterization') || command.includes('CanvasOopRasterization');
+            const hasNoFirstRun = command.includes('--no-first-run');
+            const hasDisableTranslate = command.includes('--disable-translate');
+            const hasDisableNotifications = command.includes('--disable-notifications');
+            const hasDisableCrashBubble = command.includes('--disable-session-crashed-bubble');
+            const hasSeparateProfile = command.includes('--user-data-dir');
 
             // Determine preset type based on URL and mark active
             let activePreset = 'custom';
@@ -676,14 +802,26 @@
                 activePreset = 'lumencanvas';
                 document.getElementById('lc-url').value = url;
                 document.getElementById('lc-kiosk').checked = hasKiosk;
-                document.getElementById('lc-webgpu').checked = hasWebGPU;
                 document.getElementById('lc-autoplay').checked = hasAutoplay;
+                document.getElementById('lc-webgpu').checked = hasWebGPU;
+                document.getElementById('lc-vulkan').checked = hasVulkan;
+                document.getElementById('lc-gpu-raster').checked = hasGpuRaster;
+                document.getElementById('lc-wayland').checked = hasWayland;
+                document.getElementById('lc-no-first-run').checked = hasNoFirstRun;
+                document.getElementById('lc-disable-translate').checked = hasDisableTranslate;
+                document.getElementById('lc-disable-notifications').checked = hasDisableNotifications;
+                document.getElementById('lc-disable-crash-bubble').checked = hasDisableCrashBubble;
+                document.getElementById('lc-separate-profile').checked = hasSeparateProfile;
+                // Update preview
+                updateLcCommandPreview();
             } else if (command.includes('chromium') && url) {
                 // Web Kiosk preset
                 activePreset = 'webgpu';
                 document.getElementById('web-url').value = url;
                 document.getElementById('web-kiosk').checked = hasKiosk;
+                document.getElementById('web-wayland').checked = hasWayland;
                 document.getElementById('web-webgpu').checked = hasWebGPU;
+                document.getElementById('web-separate-profile').checked = hasSeparateProfile;
             }
 
             // Always populate custom command
@@ -700,10 +838,10 @@
                 if (response.ok) {
                     const info = await response.json();
                     systemHostname = info.hostname || 'ossuary';
-                    document.getElementById('config-url').textContent = info.config_url || `http://${systemHostname}.local:8080`;
+                    document.getElementById('config-url').textContent = info.config_url || `http://${systemHostname}.local:8081`;
                 }
             } catch (e) {
-                document.getElementById('config-url').textContent = `http://${window.location.hostname}:8080`;
+                document.getElementById('config-url').textContent = `http://${window.location.hostname}:8081`;
             }
         }
 
@@ -712,13 +850,15 @@
             document.querySelectorAll('.tab').forEach(t => t.classList.remove('active'));
             document.querySelectorAll('.tab-content').forEach(c => c.classList.remove('active'));
 
-            const tabMap = { wifi: 0, networks: 1, display: 2, schedule: 3 };
+            const tabMap = { wifi: 0, networks: 1, display: 2, control: 3, logs: 4, schedule: 5 };
             document.querySelectorAll('.tab')[tabMap[tab]].classList.add('active');
             document.getElementById(`${tab}-tab`).classList.add('active');
 
             if (tab === 'networks') loadSavedNetworks();
             if (tab === 'schedule') loadSchedule();
             if (tab === 'display') loadCurrentConfig();
+            if (tab === 'control') loadProcessStatus();
+            if (tab === 'logs') loadLogs();
         }
 
         function showMessage(id, text, type) {
@@ -940,25 +1080,102 @@
 
         function buildLumenCanvasCommand() {
             let url = document.getElementById('lc-url').value.trim();
-            if (url && !url.startsWith('http')) url = `https://lumencanvas.studio/canvas/${url}`;
+            // Support various URL formats: full URL, projector ID, or canvas ID
+            if (url && !url.startsWith('http')) {
+                if (url.startsWith('proj_')) {
+                    url = `https://lumencanvas.studio/projector/${url}`;
+                } else {
+                    url = `https://lumencanvas.studio/canvas/${url}`;
+                }
+            }
             if (!url) url = 'https://lumencanvas.studio';
 
-            let flags = ['--password-store=basic', '--disable-session-crashed-bubble', '--noerrdialogs', '--disable-infobars'];
+            // Environment variables for Wayland
+            let env = [];
+            if (document.getElementById('lc-wayland').checked) {
+                env.push('XDG_RUNTIME_DIR=/run/user/1000', 'WAYLAND_DISPLAY=wayland-0');
+            } else {
+                env.push('DISPLAY=:0');
+            }
+
+            // Base flags that are always useful
+            let flags = ['--password-store=basic', '--noerrdialogs', '--disable-infobars'];
+
+            // Wayland platform
+            if (document.getElementById('lc-wayland').checked) {
+                flags.push('--ozone-platform=wayland');
+            }
+
+            // Display mode
             if (document.getElementById('lc-kiosk').checked) flags.push('--kiosk');
-            if (document.getElementById('lc-webgpu').checked) flags.push('--enable-features=Vulkan,UseSkiaRenderer,WebGPU', '--enable-unsafe-webgpu', '--disable-gpu-sandbox');
             if (document.getElementById('lc-autoplay').checked) flags.push('--autoplay-policy=no-user-gesture-required');
 
-            return `DISPLAY=:0 chromium ${flags.join(' ')} "${url}"`;
+            // GPU & Rendering
+            let enableFeatures = [];
+            if (document.getElementById('lc-vulkan').checked) enableFeatures.push('Vulkan', 'UseSkiaRenderer');
+            if (document.getElementById('lc-gpu-raster').checked) enableFeatures.push('CanvasOopRasterization');
+            if (document.getElementById('lc-webgpu').checked) {
+                enableFeatures.push('WebGPU');
+                flags.push('--enable-unsafe-webgpu', '--disable-gpu-sandbox');
+            }
+            if (enableFeatures.length > 0) {
+                flags.push(`--enable-features=${enableFeatures.join(',')}`);
+            }
+
+            // Browser behavior
+            if (document.getElementById('lc-no-first-run').checked) flags.push('--no-first-run', '--disable-default-apps');
+            if (document.getElementById('lc-disable-translate').checked) flags.push('--disable-translate', '--disable-features=TranslateUI');
+            if (document.getElementById('lc-disable-notifications').checked) flags.push('--disable-notifications');
+            if (document.getElementById('lc-disable-crash-bubble').checked) flags.push('--disable-session-crashed-bubble');
+            if (document.getElementById('lc-separate-profile').checked) flags.push('--user-data-dir=/home/pi/.config/chromium-kiosk');
+
+            return `${env.join(' ')} chromium ${flags.join(' ')} "${url}"`;
         }
 
-        async function saveLumenCanvasConfig() { await saveCommand(buildLumenCanvasCommand()); }
+        function updateLcCommandPreview() {
+            const cmd = buildLumenCanvasCommand();
+            document.getElementById('lc-command-preview').value = cmd;
+        }
+
+        async function saveLumenCanvasConfig() {
+            const cmd = buildLumenCanvasCommand();
+            document.getElementById('lc-command-preview').value = cmd;
+            await saveCommand(cmd);
+        }
 
         function buildWebKioskCommand() {
             const url = document.getElementById('web-url').value.trim() || 'https://example.com';
-            let flags = ['--password-store=basic', '--noerrdialogs', '--disable-infobars'];
+
+            // Environment variables for Wayland vs X11
+            let env = [];
+            if (document.getElementById('web-wayland').checked) {
+                env.push('XDG_RUNTIME_DIR=/run/user/1000', 'WAYLAND_DISPLAY=wayland-0');
+            } else {
+                env.push('DISPLAY=:0');
+            }
+
+            // Base flags
+            let flags = ['--password-store=basic', '--noerrdialogs', '--disable-infobars', '--no-first-run', '--disable-default-apps'];
+
+            // Wayland platform
+            if (document.getElementById('web-wayland').checked) {
+                flags.push('--ozone-platform=wayland');
+            }
+
+            // Display mode
             if (document.getElementById('web-kiosk').checked) flags.push('--kiosk');
-            if (document.getElementById('web-webgpu').checked) flags.push('--enable-features=Vulkan,UseSkiaRenderer,WebGPU', '--enable-unsafe-webgpu', '--disable-gpu-sandbox');
-            return `DISPLAY=:0 chromium ${flags.join(' ')} "${url}"`;
+
+            // GPU features
+            if (document.getElementById('web-webgpu').checked) {
+                flags.push('--enable-features=Vulkan,UseSkiaRenderer,WebGPU', '--enable-unsafe-webgpu', '--disable-gpu-sandbox');
+            }
+
+            // Isolated profile
+            if (document.getElementById('web-separate-profile').checked) {
+                flags.push('--user-data-dir=/home/pi/.config/chromium-kiosk');
+            }
+
+            return `${env.join(' ')} chromium ${flags.join(' ')} "${url}"`;
         }
 
         async function saveWebKioskConfig() { await saveCommand(buildWebKioskCommand()); }
@@ -1109,6 +1326,174 @@
             } catch (e) {
                 alert('Failed to save timezone');
             }
+        }
+
+        // Process control functions
+        async function loadProcessStatus() {
+            try {
+                const response = await fetch('/api/process/status');
+                const data = await response.json();
+
+                const stateEl = document.getElementById('process-state');
+                const indicatorEl = document.getElementById('process-indicator');
+                const commandDisplayEl = document.getElementById('process-command-display');
+                const currentCommandEl = document.getElementById('current-command-text');
+
+                // Update status display
+                const state = data.state || 'unknown';
+                stateEl.textContent = state.charAt(0).toUpperCase() + state.slice(1);
+
+                // Update indicator color
+                if (state === 'running') {
+                    indicatorEl.style.background = 'var(--success)';
+                } else if (state === 'stopped' || state === 'inactive') {
+                    indicatorEl.style.background = 'var(--warning)';
+                } else if (state === 'failed') {
+                    indicatorEl.style.background = 'var(--error)';
+                } else {
+                    indicatorEl.style.background = 'var(--ink-muted)';
+                }
+
+                // Show current command
+                if (data.command) {
+                    commandDisplayEl.textContent = data.command;
+                    currentCommandEl.textContent = data.command;
+                } else {
+                    commandDisplayEl.textContent = 'No command configured';
+                    currentCommandEl.textContent = 'No command set';
+                }
+            } catch (e) {
+                document.getElementById('process-state').textContent = 'Error loading status';
+            }
+        }
+
+        async function controlProcess(action) {
+            const btn = document.getElementById(`btn-${action}`);
+            const originalText = btn.textContent;
+            btn.disabled = true;
+            btn.textContent = 'Working...';
+
+            try {
+                const response = await fetch(`/api/process/${action}`, { method: 'POST' });
+                const data = await response.json();
+
+                if (response.ok) {
+                    showMessage('control-message', data.message || `Process ${action} successful`, 'success');
+                } else {
+                    showMessage('control-message', data.error || `Failed to ${action} process`, 'error');
+                }
+
+                // Refresh status after a short delay
+                setTimeout(loadProcessStatus, 1000);
+            } catch (e) {
+                showMessage('control-message', `Error: ${e.message}`, 'error');
+            } finally {
+                btn.disabled = false;
+                btn.textContent = originalText;
+            }
+        }
+
+        async function clearStartupCommand() {
+            if (!confirm('Clear the startup command? The kiosk will show the welcome page on next restart.')) return;
+
+            try {
+                const response = await fetch('/api/startup/clear', { method: 'POST' });
+                const data = await response.json();
+
+                if (response.ok) {
+                    showMessage('control-message', 'Startup command cleared', 'success');
+                    document.getElementById('current-command-text').textContent = 'No command set';
+                    document.getElementById('process-command-display').textContent = 'No command configured';
+                    loadProcessStatus();
+                } else {
+                    showMessage('control-message', data.error || 'Failed to clear command', 'error');
+                }
+            } catch (e) {
+                showMessage('control-message', `Error: ${e.message}`, 'error');
+            }
+        }
+
+        async function setDisplayPower(on) {
+            try {
+                const response = await fetch('/api/display/power', {
+                    method: 'POST',
+                    headers: {'Content-Type': 'application/json'},
+                    body: JSON.stringify({ power: on ? 'on' : 'off' })
+                });
+                const data = await response.json();
+
+                if (response.ok) {
+                    showMessage('control-message', `Display turned ${on ? 'on' : 'off'}`, 'success');
+                } else {
+                    showMessage('control-message', data.error || 'Failed to change display power', 'error');
+                }
+            } catch (e) {
+                showMessage('control-message', `Error: ${e.message}`, 'error');
+            }
+        }
+
+        async function takeScreenshot() {
+            try {
+                showMessage('control-message', 'Capturing screenshot...', 'success');
+                const response = await fetch('/api/screenshot');
+
+                if (response.ok) {
+                    const blob = await response.blob();
+                    const url = URL.createObjectURL(blob);
+                    const a = document.createElement('a');
+                    a.href = url;
+                    a.download = `screenshot-${new Date().toISOString().slice(0,19).replace(/:/g,'-')}.png`;
+                    a.click();
+                    URL.revokeObjectURL(url);
+                    showMessage('control-message', 'Screenshot downloaded', 'success');
+                } else {
+                    const data = await response.json();
+                    showMessage('control-message', data.error || 'Failed to capture screenshot', 'error');
+                }
+            } catch (e) {
+                showMessage('control-message', `Error: ${e.message}`, 'error');
+            }
+        }
+
+        async function refreshPage() {
+            try {
+                const response = await fetch('/api/process/refresh', { method: 'POST' });
+                const data = await response.json();
+
+                if (response.ok) {
+                    showMessage('control-message', 'Page refresh signal sent', 'success');
+                } else {
+                    showMessage('control-message', data.error || 'Failed to refresh page', 'error');
+                }
+            } catch (e) {
+                showMessage('control-message', `Error: ${e.message}`, 'error');
+            }
+        }
+
+        // Logs functions
+        async function loadLogs(lines = 50) {
+            const service = document.getElementById('log-service').value;
+            const logOutput = document.getElementById('log-output');
+            logOutput.textContent = 'Loading logs...';
+
+            try {
+                const response = await fetch(`/api/logs/${service}?lines=${lines}`);
+                const data = await response.json();
+
+                if (response.ok && data.logs) {
+                    logOutput.textContent = data.logs || 'No logs available';
+                    // Scroll to bottom
+                    logOutput.scrollTop = logOutput.scrollHeight;
+                } else {
+                    logOutput.textContent = data.error || 'Failed to load logs';
+                }
+            } catch (e) {
+                logOutput.textContent = `Error loading logs: ${e.message}`;
+            }
+        }
+
+        function clearLogDisplay() {
+            document.getElementById('log-output').textContent = 'Logs cleared. Click Refresh to load again.';
         }
 
         window.onload = init;

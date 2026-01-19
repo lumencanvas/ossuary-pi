@@ -52,7 +52,7 @@ check_service() {
 # Check all services
 check_service "wifi-connect-manager" "WiFi Connect Manager" ""
 check_service "wifi-connect" "WiFi Connect (AP mode)" "8080"
-check_service "ossuary-web" "Config Web Server" "8080"
+check_service "ossuary-web" "Config Web Server" "8081"
 check_service "ossuary-startup" "Process Manager" ""
 check_service "ossuary-connection-monitor" "Connection Monitor" ""
 check_service "captive-portal-proxy" "Captive Portal Proxy" "80"
@@ -127,8 +127,8 @@ HOSTNAME=$(hostname)
 IP=$(hostname -I 2>/dev/null | awk '{print $1}')
 
 if [ -n "$IP" ]; then
-    echo -e "Control Panel:  ${CYAN}http://${HOSTNAME}.local:8080${NC}"
-    echo -e "                http://${IP}:8080"
+    echo -e "Control Panel:  ${CYAN}http://${HOSTNAME}.local:8081${NC}"
+    echo -e "                http://${IP}:8081"
 else
     echo -e "When in AP mode, connect to: ${CYAN}Ossuary-Setup${NC}"
     echo -e "Then visit:     http://192.168.42.1"
