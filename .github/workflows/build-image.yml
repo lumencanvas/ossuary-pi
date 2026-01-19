@@ -52,9 +52,9 @@ jobs:
           image-name: ossuary-pi-${{ steps.version.outputs.version }}
           stage-list: stage0 stage1 stage2 ./stage-ossuary
 
-          # Use official RPi-Distro pi-gen with latest updates
+          # Use official RPi-Distro pi-gen bookworm branch
           pi-gen-repository: RPi-Distro/pi-gen
-          pi-gen-version: master
+          pi-gen-version: bookworm
 
           # Base image settings
           release: bookworm

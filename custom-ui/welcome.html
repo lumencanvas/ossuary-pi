@@ -256,7 +256,7 @@
         <div class="card">
             <h2>Already on the Network?</h2>
             <p style="font-size: 0.875rem; color: var(--muted); margin-bottom: 0.5rem;">Access the control panel at:</p>
-            <span class="highlight" id="hostname-url">http://ossuary.local:8080</span>
+            <span class="highlight" id="hostname-url">http://ossuary.local:8081</span>
         </div>
 
         <div class="status">
@@ -291,7 +291,7 @@
             const hostname = location.hostname || 'ossuary.local';
             if (hostname && hostname !== '192.168.42.1') {
                 document.getElementById('hostname-url').textContent =
-                    'http://' + hostname + ':8080';
+                    'http://' + hostname + ':8081';
             }
         } catch(e) {}
     </script>
