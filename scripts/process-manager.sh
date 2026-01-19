@@ -8,8 +8,8 @@ LOG_FILE="/var/log/ossuary-process.log"
 PID_FILE="/run/ossuary/process.pid"
 RESTART_DELAY=5
 
-# Essential Chromium flags for kiosk mode (prevents password prompts, crash dialogs, etc.)
-CHROMIUM_KIOSK_FLAGS="--password-store=basic --disable-session-crashed-bubble --disable-infobars --noerrdialogs --disable-translate --disable-features=TranslateUI --autoplay-policy=no-user-gesture-required --check-for-update-interval=31536000"
+# Essential Chromium flags for kiosk mode (prevents prompts, dialogs, first-run wizards)
+CHROMIUM_KIOSK_FLAGS="--password-store=basic --disable-session-crashed-bubble --disable-infobars --noerrdialogs --no-first-run --disable-default-apps --disable-translate --disable-features=TranslateUI --disable-notifications --autoplay-policy=no-user-gesture-required --check-for-update-interval=31536000"
 
 # GPU stability flags (--use-gl=egl fixes issues on Pi Zero 2 W and some Pi 4 configs)
 CHROMIUM_GPU_FLAGS="--use-gl=egl --enable-gpu-rasterization --ignore-gpu-blocklist"
@@ -19,6 +19,9 @@ CHROMIUM_WAYLAND_FLAGS="--ozone-platform=wayland --start-maximized"
 
 # WebGPU/Performance flags for LumenCanvas and graphics-heavy apps (optional, can cause instability)
 CHROMIUM_WEBGPU_FLAGS="--enable-features=Vulkan,UseSkiaRenderer,WebGPU --enable-unsafe-webgpu"
+
+# User data directory for kiosk mode (isolated from normal browsing)
+CHROMIUM_DATA_DIR="--user-data-dir=/home/pi/.config/chromium-kiosk"
 
 # Ensure log directory exists
 mkdir -p "$(dirname "$LOG_FILE")"
@@ -118,6 +121,26 @@ enhance_chromium_command() {
     # Add GPU rasterization for better performance
     if ! echo "$command" | grep -q "enable-gpu-rasterization"; then
         enhanced=$(echo "$enhanced" | sed 's/chromium\(-browser\)\?/& --enable-gpu-rasterization/')
+    fi
+
+    # Add no-first-run to skip setup wizard
+    if ! echo "$command" | grep -q "no-first-run"; then
+        enhanced=$(echo "$enhanced" | sed 's/chromium\(-browser\)\?/& --no-first-run/')
+    fi
+
+    # Add disable-default-apps
+    if ! echo "$command" | grep -q "disable-default-apps"; then
+        enhanced=$(echo "$enhanced" | sed 's/chromium\(-browser\)\?/& --disable-default-apps/')
+    fi
+
+    # Add disable-notifications
+    if ! echo "$command" | grep -q "disable-notifications"; then
+        enhanced=$(echo "$enhanced" | sed 's/chromium\(-browser\)\?/& --disable-notifications/')
+    fi
+
+    # Add isolated user data directory for kiosk mode
+    if ! echo "$command" | grep -q "user-data-dir"; then
+        enhanced=$(echo "$enhanced" | sed 's/chromium\(-browser\)\?/& --user-data-dir=\/home\/pi\/.config\/chromium-kiosk/')
     fi
 
     # Add Wayland-specific flags if running on Wayland (Pi OS 2024+ default)
