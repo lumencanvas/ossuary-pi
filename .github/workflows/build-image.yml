@@ -36,6 +36,15 @@ jobs:
           # Copy everything except the stage itself and git files
           rsync -av --exclude='.git' --exclude='stage-ossuary' --exclude='.github' . stage-ossuary/00-install-ossuary/files/ossuary-pi/
 
+      - name: Update Debian GPG keys
+        run: |
+          # Install updated Debian keyring on the host
+          sudo apt-get update
+          sudo apt-get install -y debian-archive-keyring
+          # Export keys for use in the build
+          mkdir -p config
+          gpg --no-default-keyring --keyring /usr/share/keyrings/debian-archive-keyring.gpg --export > config/debian-keys.gpg || true
+
       - name: Build image
         uses: usimd/pi-gen-action@v1
         id: build
@@ -43,8 +52,9 @@ jobs:
           image-name: ossuary-pi-${{ steps.version.outputs.version }}
           stage-list: stage0 stage1 stage2 ./stage-ossuary
 
-          # Use latest pi-gen for updated GPG keys
-          pi-gen-version: arm64
+          # Use official RPi-Distro pi-gen with latest updates
+          pi-gen-repository: RPi-Distro/pi-gen
+          pi-gen-version: master
 
           # Base image settings
           release: bookworm
