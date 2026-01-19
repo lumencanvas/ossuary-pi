@@ -4,7 +4,7 @@
 # Configure Ossuary for first boot
 
 on_chroot << 'CHROOT_EOF'
-#!/bin/bash -e
+set -e
 
 INSTALL_DIR="/opt/ossuary"
 CUSTOM_UI_DIR="/opt/ossuary/custom-ui"
