@@ -218,13 +218,48 @@ Recent failed runs:
 - v1.2.0: 21127155048
 - v1.1.0: 21126575197
 
+## Fix Applied (2026-01-19)
+
+### Root Cause Analysis
+
+Based on research into pi-gen's source code:
+
+1. **ROOTFS_DIR Resolution**: For a custom stage like `./stage-ossuary`, pi-gen correctly sets:
+   - `STAGE` = `stage-ossuary` (basename)
+   - `STAGE_WORK_DIR` = `/pi-gen/work/<image-name>/stage-ossuary`
+   - `ROOTFS_DIR` = `/pi-gen/work/<image-name>/stage-ossuary/rootfs`
+
+2. **Script Execution Order**: Within a stage subdirectory, pi-gen processes:
+   - `00-packages` (apt-get install via chroot) - WORKS
+   - `00-run.sh` (host script) - WORKS
+   - `00-run-chroot.sh` (sourced, calls on_chroot) - FAILS
+
+3. **Hypothesis**: Something in the pi-gen-action or pi-gen's script runner may be causing issues when transitioning between separate script files, particularly when the same chroot operations span multiple files.
+
+### Solution
+
+Combined `00-run.sh` and `00-run-chroot.sh` into a single `00-run.sh` script that:
+1. Runs host operations (copying files to ROOTFS_DIR)
+2. Calls `on_chroot` directly to run chroot operations
+
+This ensures:
+- All operations happen in a single script execution
+- No mysterious state changes between script files
+- Better error reporting with debug output
+
+### Changes Made
+
+1. **`stage-ossuary/00-install-ossuary/00-run.sh`**: Combined script with host ops + `on_chroot` heredoc
+2. **`stage-ossuary/00-install-ossuary/00-run-chroot.sh`**: DELETED (merged into 00-run.sh)
+3. **`stage-ossuary/prerun.sh`**: Added debug output to see ROOTFS_DIR and copy_previous behavior
+
 ## Next Steps
 
-1. Study pi-gen source code, especially `scripts/common` and `build.sh`
-2. Look at how `${ROOTFS_DIR}` is set for custom stages with `./` prefix
-3. Try the minimal chroot test to isolate the issue
-4. Consider running pi-gen locally with Docker for better debugging
-5. Check pi-gen-action issues for similar problems
+1. ~~Study pi-gen source code, especially `scripts/common` and `build.sh`~~ ✓
+2. ~~Look at how `${ROOTFS_DIR}` is set for custom stages with `./` prefix~~ ✓
+3. ~~Try the minimal chroot test to isolate the issue~~ (Skipped - applied fix instead)
+4. Test the fix by triggering a new build
+5. If still failing, check the new debug output for clues
 
 ## Alternative Approaches If pi-gen Continues to Fail
 
