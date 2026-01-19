@@ -220,7 +220,7 @@ The GitHub Actions workflow builds Pi images on:
 
 ## Known Issues / Tech Debt
 
-1. **Pi-gen build failing** - Fix applied (combined run.sh + run-chroot.sh). See `PI_GEN_BUILD_ISSUE.md` for details. Awaiting test build.
+1. ~~**Pi-gen build failing**~~ - **RESOLVED** (combined run.sh + run-chroot.sh). Build 21131506328 succeeded.
 2. **No config encryption**: WiFi passwords stored in plaintext in config.json
 3. **No HTTPS**: Config server uses HTTP only
 4. **Schedule timezone**: Auto-detect uses system timezone but UI doesn't show what it detected
