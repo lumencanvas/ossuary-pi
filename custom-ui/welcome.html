@@ -31,13 +31,16 @@
             flex-direction: column;
             align-items: center;
             justify-content: center;
-            padding: 2rem;
+            /* Extra padding for round/unusual displays - keeps content in safe zone */
+            padding: 10vh 10vw;
             text-align: center;
         }
 
         .container {
-            max-width: 600px;
+            max-width: 500px;
             width: 100%;
+            /* Additional padding inside container */
+            padding: 1.5rem;
         }
 
         .logo {
@@ -162,9 +165,10 @@
             text-decoration: none;
         }
 
+        /* Small screens - maintain safe zone for round displays */
         @media (max-width: 480px) {
             body {
-                padding: 1rem;
+                padding: 8vh 8vw;
             }
 
             h1 {
@@ -172,7 +176,7 @@
             }
 
             .card {
-                padding: 1.5rem;
+                padding: 1.25rem;
             }
 
             .logo svg {
@@ -181,45 +185,105 @@
             }
         }
 
-        /* For small kiosk displays */
+        /* For small kiosk displays and round screens */
         @media (max-height: 600px) {
             body {
+                /* Keep generous padding for round displays */
+                padding: 12vh 12vw;
+                justify-content: center;
+            }
+
+            .container {
                 padding: 1rem;
-                justify-content: flex-start;
             }
 
             .logo {
-                margin-bottom: 1rem;
-            }
-
-            .logo svg {
-                width: 60px;
-                height: 60px;
-            }
-
-            h1 {
-                font-size: 1.25rem;
-            }
-
-            .subtitle {
-                margin-bottom: 1rem;
-                font-size: 0.875rem;
-            }
-
-            .card {
-                padding: 1rem;
-                margin-bottom: 1rem;
-            }
-
-            .step {
                 margin-bottom: 0.75rem;
             }
 
-            .step-number {
-                width: 24px;
-                height: 24px;
-                min-width: 24px;
+            .logo svg {
+                width: 50px;
+                height: 50px;
+            }
+
+            h1 {
+                font-size: 1.1rem;
+                margin-bottom: 0.25rem;
+            }
+
+            .subtitle {
+                margin-bottom: 0.75rem;
                 font-size: 0.75rem;
+            }
+
+            .card {
+                padding: 0.75rem;
+                margin-bottom: 0.75rem;
+            }
+
+            .card h2 {
+                font-size: 0.75rem;
+                margin-bottom: 0.5rem;
+            }
+
+            .step {
+                margin-bottom: 0.5rem;
+            }
+
+            .step-number {
+                width: 20px;
+                height: 20px;
+                min-width: 20px;
+                font-size: 0.65rem;
+                margin-right: 0.5rem;
+            }
+
+            .step-content h3 {
+                font-size: 0.8rem;
+            }
+
+            .step-content p {
+                font-size: 0.7rem;
+            }
+
+            .highlight {
+                font-size: 0.7rem;
+                padding: 0.1rem 0.35rem;
+            }
+
+            .status {
+                margin-top: 0.5rem;
+                font-size: 0.7rem;
+            }
+
+            .footer {
+                margin-top: 0.75rem;
+                font-size: 0.6rem;
+            }
+        }
+
+        /* Very small round displays (e.g., 240px) */
+        @media (max-width: 300px), (max-height: 300px) {
+            body {
+                padding: 15% 15%;
+            }
+
+            .logo svg {
+                width: 40px;
+                height: 40px;
+            }
+
+            h1 {
+                font-size: 0.9rem;
+            }
+
+            .subtitle {
+                font-size: 0.65rem;
+            }
+
+            .card:last-of-type,
+            .footer {
+                display: none;
             }
         }
     </style>
