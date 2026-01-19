@@ -739,7 +739,21 @@
             try {
                 const response = await fetch('/api/saved-networks');
                 const data = await response.json();
-                savedNetworks = data.saved_networks || [];
+                // Merge config saved networks with NetworkManager networks
+                const configNetworks = data.saved_networks || [];
+                const nmNetworks = data.nm_networks || [];
+
+                // Create a map of SSIDs we already have from config
+                const configSSIDs = new Set(configNetworks.map(n => n.ssid));
+
+                // Add NM networks that aren't in config
+                savedNetworks = [...configNetworks];
+                nmNetworks.forEach(nm => {
+                    if (!configSSIDs.has(nm.ssid)) {
+                        savedNetworks.push({ ssid: nm.ssid, from_nm: true });
+                    }
+                });
+
                 renderSavedNetworks();
             } catch (e) {
                 savedNetworks = [];
@@ -759,11 +773,11 @@
                     <div class="saved-network-info">
                         <div class="saved-network-ssid">${n.ssid}</div>
                         ${n.notes ? `<div class="saved-network-notes">${n.notes}</div>` : ''}
-                        <div class="saved-network-meta">${n.last_connected ? 'Last: ' + new Date(n.last_connected).toLocaleDateString() : 'Never connected'}</div>
+                        <div class="saved-network-meta">${n.from_nm ? 'Saved in system' : (n.last_connected ? 'Last: ' + new Date(n.last_connected).toLocaleDateString() : 'Never connected')}</div>
                     </div>
                     <div class="network-actions">
                         <button class="btn-small" onclick="connectSavedNetwork('${n.ssid}')">Connect</button>
-                        <button class="btn-small danger" onclick="deleteNetwork('${n.ssid}')">Delete</button>
+                        ${!n.from_nm ? `<button class="btn-small danger" onclick="deleteNetwork('${n.ssid}')">Delete</button>` : ''}
                     </div>
                 </div>
             `).join('');

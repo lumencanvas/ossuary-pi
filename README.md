@@ -2,15 +2,7 @@
 
 <p align="center">
   <a href="https://lumencanvas.studio">
-    <svg viewBox="0 0 100 100" width="120" height="120" xmlns="http://www.w3.org/2000/svg">
-      <rect x="20" y="20" width="60" height="60" rx="4" fill="none" stroke="#1a1a1a" stroke-width="2"/>
-      <defs>
-        <clipPath id="canvasClip">
-          <rect x="22" y="22" width="56" height="56" rx="2"/>
-        </clipPath>
-      </defs>
-      <polygon points="0,0 50,50 0,100" fill="#8ED3EF" clip-path="url(#canvasClip)"/>
-    </svg>
+    <img src="screenshots/wifi-tab.png" alt="Ossuary Pi Control Panel" width="600">
   </a>
 </p>
 
@@ -21,8 +13,8 @@
 
 <p align="center">
   <a href="#features">Features</a> •
-  <a href="#quick-install">Install</a> •
-  <a href="#how-it-works">How It Works</a> •
+  <a href="#quick-start">Quick Start</a> •
+  <a href="#full-setup-guide">Full Setup</a> •
   <a href="#configuration">Configuration</a> •
   <a href="#troubleshooting">Troubleshooting</a>
 </p>
@@ -44,10 +36,81 @@
 
 - Raspberry Pi 4 or 5 (64-bit recommended)
 - Raspberry Pi OS Bookworm (2024) or Trixie (2025+)
-- WiFi connectivity for initial setup
+- MicroSD card (16GB+ recommended)
+- WiFi connectivity
 - Display connected for kiosk mode
 
-## Quick Install
+---
+
+## Quick Start
+
+If you already have a Pi with Raspberry Pi OS and SSH access:
+
+```bash
+git clone https://github.com/lumencanvas/ossuary-pi.git
+cd ossuary-pi
+sudo ./install.sh
+```
+
+The installer will configure everything and reboot. After reboot, access the control panel at `http://your-pi-hostname.local:8080`.
+
+---
+
+## Full Setup Guide
+
+### Step 1: Prepare the SD Card
+
+1. **Download Raspberry Pi Imager** from [raspberrypi.com/software](https://www.raspberrypi.com/software/)
+
+2. **Open Raspberry Pi Imager** and select:
+   - **Device**: Your Raspberry Pi model (Pi 4, Pi 5, etc.)
+   - **OS**: Raspberry Pi OS (64-bit) — under "Raspberry Pi OS (other)"
+   - **Storage**: Your SD card
+
+3. **Click the gear icon** (or "Edit Settings") to configure:
+   - **Hostname**: Choose a name (e.g., `ossuary-kiosk`)
+   - **Username/Password**: Set your login credentials
+   - **WiFi**: Enter your network name and password
+   - **SSH**: Enable SSH with password authentication
+   - **Locale**: Set your timezone and keyboard layout
+
+4. **Write** the image to the SD card
+
+> For detailed instructions, see the [official Raspberry Pi documentation](https://www.raspberrypi.com/documentation/computers/getting-started.html).
+
+### Step 2: Connect via SSH
+
+Insert the SD card into your Pi and power it on. Wait 1-2 minutes for first boot.
+
+**On macOS/Linux** — Open Terminal:
+```bash
+ssh pi@your-hostname.local
+# or use the IP address
+ssh pi@192.168.1.xxx
+```
+
+**On Windows** — Use [PuTTY](https://www.putty.org/) or Windows Terminal:
+```bash
+ssh pi@your-hostname.local
+```
+
+> Can't find your Pi? Check your router's connected devices or use `ping your-hostname.local`.
+
+### Step 3: Update the System
+
+```bash
+sudo apt-get update && sudo apt-get upgrade -y
+```
+
+Optional but recommended — configure Pi settings:
+```bash
+sudo raspi-config
+```
+- **System Options > Boot / Auto Login** — Select "Desktop Autologin"
+- **Display Options > Screen Blanking** — Disable screen blanking
+- **Finish** and reboot if prompted
+
+### Step 4: Install Ossuary
 
 ```bash
 git clone https://github.com/lumencanvas/ossuary-pi.git
@@ -56,11 +119,31 @@ sudo ./install.sh
 ```
 
 The installer will:
-1. Install required packages (NetworkManager, Python, etc.)
+1. Install required packages (NetworkManager, Python, Chromium, etc.)
 2. Download and configure Balena WiFi Connect
 3. Set up all systemd services
 4. Configure auto-login for kiosk mode
-5. Reboot automatically when complete
+5. **Reboot automatically** when complete
+
+> The installation runs in the background if you're connected via SSH, so you won't lose progress if disconnected.
+
+### Step 5: Configure Your Kiosk
+
+After reboot, access the control panel:
+- **URL**: `http://your-hostname.local:8080`
+- **Example**: `http://ossuary-kiosk.local:8080`
+
+<p align="center">
+  <img src="screenshots/display-tab.png" alt="Display Configuration" width="500">
+</p>
+
+Select a preset or enter a custom command:
+
+<p align="center">
+  <img src="screenshots/lumencanvas-configuration.png" alt="LumenCanvas Configuration" width="500">
+</p>
+
+---
 
 ## How It Works
 
@@ -86,19 +169,33 @@ When configured, Ossuary can:
 - **On connection regained**: Refresh the page automatically
 - **On schedule**: Refresh at configured intervals
 
+---
+
 ## Configuration
 
 ### Web Control Panel
 
+<p align="center">
+  <img src="screenshots/wifi-tab.png" alt="WiFi Tab" width="500">
+</p>
+
 Access at `http://your-pi-hostname.local:8080` when connected to the same network.
 
-Features:
+**Features:**
 - View system status and network info
 - Configure startup command
 - Set up connection behaviors
 - Schedule automatic refreshes
 - Change WiFi networks
 - Reboot the system
+
+### Scheduling
+
+Set up automatic refresh schedules:
+
+<p align="center">
+  <img src="screenshots/add-schedule-rule.png" alt="Add Schedule Rule" width="500">
+</p>
 
 ### Startup Command Examples
 
@@ -142,6 +239,8 @@ Stored at `/etc/ossuary/config.json`:
 }
 ```
 
+---
+
 ## Services
 
 Ossuary runs several systemd services:
@@ -172,6 +271,8 @@ journalctl -u ossuary-startup -u ossuary-web -u wifi-connect -f
 # Just the startup command
 cat /var/log/ossuary-process.log
 ```
+
+---
 
 ## Troubleshooting
 
@@ -217,6 +318,8 @@ The process manager automatically:
 
 If issues persist, check: `/home/pi/.config/chromium/Default/Preferences`
 
+---
+
 ## Uninstall
 
 ```bash
@@ -224,6 +327,8 @@ sudo /opt/ossuary/uninstall.sh
 ```
 
 This removes all Ossuary services, scripts, and configuration while preserving NetworkManager settings.
+
+---
 
 ## File Locations
 
@@ -234,6 +339,8 @@ This removes all Ossuary services, scripts, and configuration while preserving N
 | `/etc/ossuary/config.json` | Configuration |
 | `/var/log/ossuary-process.log` | Process manager log |
 | `/run/ossuary/` | Runtime PID files |
+
+---
 
 ## Architecture
 
@@ -262,12 +369,16 @@ This removes all Ossuary services, scripts, and configuration while preserving N
 └─────────────────────────────────────────────────────────────┘
 ```
 
+---
+
 ## Documentation
 
 - [User Guide](docs/USER_GUIDE.md) — Detailed usage instructions
 - [Technical Reference](docs/TECHNICAL_REFERENCE.md) — API endpoints, file formats
 - [Troubleshooting](TROUBLESHOOTING.md) — Common issues and solutions
 - [WiFi Connect Flags](docs/WIFI_CONNECT_FLAGS.md) — Chromium flag reference
+
+---
 
 ## Contributing
 
