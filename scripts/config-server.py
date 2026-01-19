@@ -254,6 +254,12 @@ class ConfigHandler(SimpleHTTPRequestHandler):
             self.handle_process_refresh()
         elif parsed_path.path == '/api/process/restart':
             self.handle_process_restart()
+        elif parsed_path.path == '/api/process/stop':
+            self.handle_process_stop()
+        elif parsed_path.path == '/api/process/start':
+            self.handle_process_start()
+        elif parsed_path.path == '/api/startup/clear':
+            self.handle_clear_startup()
         elif parsed_path.path == '/api/system/reboot':
             self.handle_system_reboot()
         elif parsed_path.path == '/api/schedule':
@@ -722,6 +728,53 @@ class ConfigHandler(SimpleHTTPRequestHandler):
                 'success': result.returncode == 0,
                 'output': result.stdout + result.stderr
             })
+        except Exception as e:
+            self.send_json_response({'error': str(e)}, 500)
+
+    def handle_process_stop(self):
+        """Stop the running process (but keep service active for restart)"""
+        try:
+            # Send SIGTERM to the process manager's child process
+            pid_file = '/run/ossuary/process.pid.child'
+            if os.path.exists(pid_file):
+                with open(pid_file, 'r') as f:
+                    pid = int(f.read().strip())
+                os.kill(pid, signal.SIGTERM)
+                self.send_json_response({'success': True, 'message': f'Stopped process {pid}'})
+            else:
+                # Try stopping via systemctl
+                result = subprocess.run(
+                    ['systemctl', 'stop', 'ossuary-startup'],
+                    capture_output=True, text=True, timeout=10
+                )
+                self.send_json_response({
+                    'success': result.returncode == 0,
+                    'output': result.stdout + result.stderr
+                })
+        except Exception as e:
+            self.send_json_response({'error': str(e)}, 500)
+
+    def handle_process_start(self):
+        """Start the process service"""
+        try:
+            result = subprocess.run(
+                ['systemctl', 'start', 'ossuary-startup'],
+                capture_output=True, text=True, timeout=10
+            )
+            self.send_json_response({
+                'success': result.returncode == 0,
+                'output': result.stdout + result.stderr
+            })
+        except Exception as e:
+            self.send_json_response({'error': str(e)}, 500)
+
+    def handle_clear_startup(self):
+        """Clear the startup command"""
+        try:
+            config = self._load_config()
+            config['startup_command'] = ''
+            self._save_config(config)
+            self.send_json_response({'success': True, 'message': 'Startup command cleared'})
         except Exception as e:
             self.send_json_response({'error': str(e)}, 500)
 

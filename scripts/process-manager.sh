@@ -656,7 +656,14 @@ show_welcome_page() {
     fi
 
     # Launch Chromium with welcome page in kiosk mode
-    local chromium_cmd="chromium-browser --kiosk --password-store=basic --disable-session-crashed-bubble --disable-infobars --noerrdialogs --check-for-update-interval=31536000 file://${WELCOME_PAGE}"
+    # Detect display type for proper flags
+    local display_type=$(detect_display_server)
+    local wayland_flags=""
+    if [ "$display_type" = "wayland" ]; then
+        wayland_flags="--ozone-platform=wayland --start-maximized"
+    fi
+
+    local chromium_cmd="chromium --kiosk --password-store=basic --disable-session-crashed-bubble --disable-infobars --noerrdialogs --use-gl=egl --check-for-update-interval=31536000 $wayland_flags file://${WELCOME_PAGE}"
 
     log "Launching welcome page: $chromium_cmd"
 
