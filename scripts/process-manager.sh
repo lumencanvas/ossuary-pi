@@ -25,17 +25,19 @@ log() {
 # Function to get command from config
 get_command() {
     if [ -f "$CONFIG_FILE" ]; then
-        # Extract startup_command from JSON, strip whitespace
+        # Extract startup_command from JSON using python with properly escaped path
+        local config_path="$CONFIG_FILE"
         local cmd=$(python3 -c "
 import json
+import sys
 try:
-    with open('$CONFIG_FILE', 'r') as f:
+    with open(sys.argv[1], 'r') as f:
         config = json.load(f)
         cmd = config.get('startup_command', '') or ''
         print(cmd.strip())
 except:
     pass
-" 2>/dev/null)
+" "$config_path" 2>/dev/null)
         # Return trimmed command (handles whitespace-only values)
         echo "$cmd" | xargs 2>/dev/null || echo ""
     fi
@@ -346,64 +348,93 @@ run_command() {
             log "Clean command: $clean_command"
         fi
 
-        # Create a wrapper script to run the command and capture its PID
+        # Create wrapper script and command file to avoid shell injection
+        # The command is written to a separate file and read safely
         local wrapper_script="/tmp/ossuary-wrapper-$$.sh"
-        cat > "$wrapper_script" << WRAPPER_EOF
-#!/bin/bash
-# Write the actual command PID to a file
-PID_FILE="${PID_FILE}.actual"
+        local command_file="/tmp/ossuary-cmd-$$.txt"
+        local env_file="/tmp/ossuary-env-$$.txt"
 
-# Run the command and save its PID
+        # Write command and env vars to files (safe from injection)
+        printf '%s' "$clean_command" > "$command_file"
+        printf '%s' "$extra_env" > "$env_file"
+
+        # Write wrapper script with heredoc that doesn't expand variables
+        cat > "$wrapper_script" << 'WRAPPER_EOF'
+#!/bin/bash
+# Wrapper script - reads command from file to avoid injection
+
+# Read configuration from environment (set by caller)
+OSSUARY_CMD_FILE="$1"
+OSSUARY_ENV_FILE="$2"
+OSSUARY_IS_GUI="$3"
+OSSUARY_DISPLAY="$4"
+OSSUARY_XAUTH="$5"
+OSSUARY_HOME="$6"
+OSSUARY_WAYLAND="$7"
+OSSUARY_XDG_RUNTIME="$8"
+OSSUARY_SESSION_TYPE="$9"
+
+# Read the actual command from file
+if [ ! -f "$OSSUARY_CMD_FILE" ]; then
+    echo "Error: Command file not found: $OSSUARY_CMD_FILE"
+    exit 1
+fi
+OSSUARY_COMMAND=$(cat "$OSSUARY_CMD_FILE")
+
+# Read env vars from file (may be empty)
+OSSUARY_EXTRA_ENV=""
+if [ -f "$OSSUARY_ENV_FILE" ]; then
+    OSSUARY_EXTRA_ENV=$(cat "$OSSUARY_ENV_FILE")
+fi
+
+# Determine which user to run as
+run_user=""
 if id "pi" &>/dev/null; then
-    if [ "$is_gui_app" = true ]; then
-        exec su pi -c "export DISPLAY='${DISPLAY:-:0}'; \
-            export XAUTHORITY='${XAUTHORITY}'; \
-            export HOME='${HOME}'; \
-            export WAYLAND_DISPLAY='${WAYLAND_DISPLAY}'; \
-            export XDG_RUNTIME_DIR='${XDG_RUNTIME_DIR}'; \
-            export XDG_SESSION_TYPE='${XDG_SESSION_TYPE}'; \
-            $extra_env \
-            exec $clean_command"
+    run_user="pi"
+else
+    run_user=$(getent passwd | awk -F: '$3 >= 1000 && $3 < 65534 {print $1}' | head -1)
+fi
+
+# Build the command to run
+if [ "$OSSUARY_IS_GUI" = "true" ]; then
+    gui_exports="export DISPLAY='$OSSUARY_DISPLAY'; export XAUTHORITY='$OSSUARY_XAUTH'; export HOME='$OSSUARY_HOME'; export WAYLAND_DISPLAY='$OSSUARY_WAYLAND'; export XDG_RUNTIME_DIR='$OSSUARY_XDG_RUNTIME'; export XDG_SESSION_TYPE='$OSSUARY_SESSION_TYPE';"
+fi
+
+if [ -n "$run_user" ]; then
+    if [ "$OSSUARY_IS_GUI" = "true" ]; then
+        exec su "$run_user" -s /bin/bash -c "$gui_exports $OSSUARY_EXTRA_ENV exec $OSSUARY_COMMAND"
     else
-        exec su pi -c "$extra_env exec $clean_command"
+        exec su "$run_user" -s /bin/bash -c "$OSSUARY_EXTRA_ENV exec $OSSUARY_COMMAND"
     fi
 else
-    # Find first non-root user
-    default_user=\$(getent passwd | awk -F: '\$3 >= 1000 && \$3 < 65534 {print \$1}' | head -1)
-    if [ -n "\$default_user" ]; then
-        if [ "$is_gui_app" = true ]; then
-            exec su "\$default_user" -c "export DISPLAY='${DISPLAY:-:0}'; \
-                export XAUTHORITY='${XAUTHORITY}'; \
-                export HOME='${HOME}'; \
-                export WAYLAND_DISPLAY='${WAYLAND_DISPLAY}'; \
-                export XDG_RUNTIME_DIR='${XDG_RUNTIME_DIR}'; \
-                export XDG_SESSION_TYPE='${XDG_SESSION_TYPE}'; \
-                $extra_env \
-                exec $clean_command"
-        else
-            exec su "\$default_user" -c "$extra_env exec $clean_command"
-        fi
-    else
-        # Fallback to running as current user
-        if [ "$is_gui_app" = true ]; then
-            export DISPLAY='${DISPLAY:-:0}'
-            export XAUTHORITY='${XAUTHORITY}'
-            export HOME='${HOME}'
-            export WAYLAND_DISPLAY='${WAYLAND_DISPLAY}'
-            export XDG_RUNTIME_DIR='${XDG_RUNTIME_DIR}'
-            export XDG_SESSION_TYPE='${XDG_SESSION_TYPE}'
-            eval "$extra_env"
-        fi
-        exec bash -c "$clean_command"
+    # Fallback to current user
+    if [ "$OSSUARY_IS_GUI" = "true" ]; then
+        export DISPLAY="$OSSUARY_DISPLAY"
+        export XAUTHORITY="$OSSUARY_XAUTH"
+        export HOME="$OSSUARY_HOME"
+        export WAYLAND_DISPLAY="$OSSUARY_WAYLAND"
+        export XDG_RUNTIME_DIR="$OSSUARY_XDG_RUNTIME"
+        export XDG_SESSION_TYPE="$OSSUARY_SESSION_TYPE"
+        eval "$OSSUARY_EXTRA_ENV"
     fi
+    exec bash -c "$OSSUARY_COMMAND"
 fi
 WRAPPER_EOF
 
         chmod +x "$wrapper_script"
 
-        # Start the wrapper script in a new session
-        # Use process substitution to avoid pipeline PID capture issues
-        setsid bash "$wrapper_script" >> "$LOG_FILE" 2>&1 &
+        # Start the wrapper script in a new session with arguments
+        setsid bash "$wrapper_script" \
+            "$command_file" \
+            "$env_file" \
+            "$is_gui_app" \
+            "${DISPLAY:-:0}" \
+            "${XAUTHORITY:-}" \
+            "${HOME:-}" \
+            "${WAYLAND_DISPLAY:-}" \
+            "${XDG_RUNTIME_DIR:-}" \
+            "${XDG_SESSION_TYPE:-}" \
+            >> "$LOG_FILE" 2>&1 &
         CHILD_PID=$!
         echo $CHILD_PID > "${PID_FILE}.child"
 
@@ -413,8 +444,8 @@ WRAPPER_EOF
         wait $CHILD_PID
         EXIT_CODE=$?
 
-        # Cleanup
-        rm -f "$wrapper_script"
+        # Cleanup wrapper and temp files
+        rm -f "$wrapper_script" "$command_file" "$env_file"
 
         rm -f "${PID_FILE}.child"
 

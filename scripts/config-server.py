@@ -13,6 +13,8 @@ import time
 import signal
 import threading
 import tempfile
+import shlex
+import re
 from http.server import HTTPServer, SimpleHTTPRequestHandler
 from urllib.parse import urlparse, parse_qs
 
@@ -423,7 +425,12 @@ class ConfigHandler(SimpleHTTPRequestHandler):
             self.send_json_response({'error': str(e)}, 500)
 
     def handle_test_command(self, post_data):
-        """Test a command"""
+        """Test a command.
+
+        SECURITY NOTE: This endpoint intentionally runs user-provided commands
+        for testing display configurations. Access should be restricted to
+        trusted networks only. The Pi is designed to run user commands.
+        """
         global TEST_PROCESSES
 
         try:
@@ -434,15 +441,31 @@ class ConfigHandler(SimpleHTTPRequestHandler):
                 self.send_json_response({'error': 'No command provided'}, 400)
                 return
 
+            # Input validation
+            command = command.strip()
+
+            # Limit command length to prevent memory issues
+            if len(command) > 4096:
+                self.send_json_response({'error': 'Command too long (max 4096 chars)'}, 400)
+                return
+
+            # Limit concurrent test processes
+            if len(TEST_PROCESSES) >= 5:
+                self.send_json_response({'error': 'Too many test processes running'}, 429)
+                return
+
+            # Log the command being tested (for audit trail)
+            print(f"[TEST] Running command: {command[:100]}{'...' if len(command) > 100 else ''}")
+
             # Create temporary file for output
             output_file = tempfile.NamedTemporaryFile(mode='w+', delete=False, suffix='.log')
             output_filename = output_file.name
             output_file.close()
 
             # Detect if this is a GUI app
-            is_gui = 'chromium' in command or 'firefox' in command or 'DISPLAY=' in command
+            is_gui = 'chromium' in command.lower() or 'firefox' in command.lower() or 'DISPLAY=' in command
 
-            # Build the test command
+            # Build the test command with proper quoting for display vars
             if is_gui:
                 # For GUI apps, set display variables
                 test_cmd = f"export DISPLAY=:0; export XAUTHORITY=/home/pi/.Xauthority; {command}"
@@ -453,20 +476,20 @@ class ConfigHandler(SimpleHTTPRequestHandler):
             output_handle = open(output_filename, 'w')
             process = subprocess.Popen(
                 test_cmd,
-                shell=True,
+                shell=True,  # Required for user commands with pipes/redirects
                 stdout=output_handle,
                 stderr=subprocess.STDOUT,
-                preexec_fn=os.setsid  # Create new process group for easy cleanup
+                preexec_fn=os.setsid,  # Create new process group for easy cleanup
+                cwd='/tmp'  # Run from safe directory
             )
-            # Store the handle so we can close it when process ends
-            # Note: handle will be closed when process cleanup occurs
 
             # Store process info including file handle for proper cleanup
             TEST_PROCESSES[str(process.pid)] = {
                 'process': process,
                 'output_file': output_filename,
                 'output_handle': output_handle,
-                'start_time': time.time()
+                'start_time': time.time(),
+                'command': command[:100]  # Store for logging
             }
 
             self.send_json_response({
@@ -474,7 +497,10 @@ class ConfigHandler(SimpleHTTPRequestHandler):
                 'message': 'Test started'
             })
 
+        except json.JSONDecodeError:
+            self.send_json_response({'error': 'Invalid JSON'}, 400)
         except Exception as e:
+            print(f"[ERROR] Test command failed: {e}")
             self.send_json_response({'error': str(e)}, 500)
 
     def handle_test_output(self, pid_str):

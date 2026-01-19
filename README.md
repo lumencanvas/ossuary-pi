@@ -210,12 +210,12 @@ Set up automatic refresh schedules:
 
 **LumenCanvas Display:**
 ```bash
-chromium-browser --kiosk https://lumencanvas.studio/canvas/YOUR_CANVAS_ID
+chromium --kiosk https://lumencanvas.studio/canvas/YOUR_CANVAS_ID
 ```
 
 **Custom Web Kiosk:**
 ```bash
-chromium-browser --kiosk https://your-website.com
+chromium --kiosk https://your-website.com
 ```
 
 **Python Script:**
@@ -236,7 +236,7 @@ Stored at `/etc/ossuary/config.json`:
 
 ```json
 {
-  "startup_command": "chromium-browser --kiosk https://lumencanvas.studio/canvas/abc123",
+  "startup_command": "chromium --kiosk https://lumencanvas.studio/canvas/abc123",
   "saved_networks": [
     {"ssid": "MyNetwork", "password": "..."}
   ],

@@ -202,8 +202,17 @@
             align-items: center; gap: var(--space-lg);
         }
         .preset-card:hover { border-color: var(--teal); background: var(--teal-muted); }
+        .preset-card.active { border-color: var(--teal); background: var(--teal-muted); position: relative; }
+        .preset-card.active::after {
+            content: 'ACTIVE'; position: absolute; top: 8px; right: 8px;
+            font-family: 'Space Mono', monospace; font-size: 9px;
+            text-transform: uppercase; letter-spacing: 0.5px;
+            padding: 2px 6px; background: var(--teal); color: white;
+        }
         .preset-card.lumencanvas { border-color: var(--lc-blue); }
         .preset-card.lumencanvas:hover { background: var(--lc-blue-muted); }
+        .preset-card.lumencanvas.active { border-color: var(--lc-blue); background: var(--lc-blue-muted); }
+        .preset-card.lumencanvas.active::after { background: var(--lc-blue); color: #000; }
         .preset-icon { width: 40px; height: 40px; flex-shrink: 0; display: flex; align-items: center; justify-content: center; font-size: 24px; }
         .preset-icon svg { width: 40px; height: 40px; }
         .preset-content { flex: 1; }
@@ -617,6 +626,7 @@
         let systemHostname = 'ossuary';
         let scheduleRules = [];
         let savedNetworks = [];
+        let currentConfig = null;
 
         // Initialize
         async function init() {
@@ -625,7 +635,63 @@
             loadSchedule();
             loadTimezone();
             fetchSystemInfo();
+            loadCurrentConfig();
             setInterval(loadNearbyNetworks, 15000);
+        }
+
+        // Load current config and detect active preset
+        async function loadCurrentConfig() {
+            try {
+                const response = await fetch('/api/startup');
+                if (response.ok) {
+                    const data = await response.json();
+                    currentConfig = { startup_command: data.command || '' };
+                    parseAndPopulateForms(currentConfig.startup_command);
+                }
+            } catch (e) {
+                console.log('Could not load current config');
+            }
+        }
+
+        // Parse startup command and populate appropriate forms
+        function parseAndPopulateForms(command) {
+            // Clear active indicators
+            document.querySelectorAll('.preset-card').forEach(c => c.classList.remove('active'));
+
+            if (!command) return;
+
+            // Extract URL from command (look for quoted URL or URL at end)
+            const urlMatch = command.match(/"([^"]+)"/) || command.match(/https?:\/\/[^\s"]+/);
+            const url = urlMatch ? (urlMatch[1] || urlMatch[0]) : '';
+
+            // Detect flags
+            const hasKiosk = command.includes('--kiosk');
+            const hasWebGPU = command.includes('--enable-features=') && command.includes('WebGPU');
+            const hasAutoplay = command.includes('--autoplay-policy=no-user-gesture-required');
+
+            // Determine preset type based on URL and mark active
+            let activePreset = 'custom';
+            if (url.includes('lumencanvas.studio') || url.includes('lumencanvas.com')) {
+                // LumenCanvas preset
+                activePreset = 'lumencanvas';
+                document.getElementById('lc-url').value = url;
+                document.getElementById('lc-kiosk').checked = hasKiosk;
+                document.getElementById('lc-webgpu').checked = hasWebGPU;
+                document.getElementById('lc-autoplay').checked = hasAutoplay;
+            } else if (command.includes('chromium') && url) {
+                // Web Kiosk preset
+                activePreset = 'webgpu';
+                document.getElementById('web-url').value = url;
+                document.getElementById('web-kiosk').checked = hasKiosk;
+                document.getElementById('web-webgpu').checked = hasWebGPU;
+            }
+
+            // Always populate custom command
+            document.getElementById('startup-cmd').value = command;
+
+            // Mark active preset card
+            const activeCard = document.querySelector(`.preset-card[onclick*="'${activePreset}'"]`);
+            if (activeCard) activeCard.classList.add('active');
         }
 
         async function fetchSystemInfo() {
@@ -652,6 +718,7 @@
 
             if (tab === 'networks') loadSavedNetworks();
             if (tab === 'schedule') loadSchedule();
+            if (tab === 'display') loadCurrentConfig();
         }
 
         function showMessage(id, text, type) {

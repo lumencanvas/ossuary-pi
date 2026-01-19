@@ -72,6 +72,10 @@ class CaptivePortalProxyHandler(http.server.BaseHTTPRequestHandler):
     # Increase timeout for slow connections
     timeout = 30
 
+    # Security limits
+    MAX_PATH_LENGTH = 2048
+    MAX_BODY_SIZE = 1024 * 1024  # 1MB max for POST bodies
+
     def log_message(self, format, *args):
         """Custom logging format."""
         print(f"[{self.log_date_time_string()}] {self.client_address[0]} - {format % args}")
@@ -176,6 +180,11 @@ class CaptivePortalProxyHandler(http.server.BaseHTTPRequestHandler):
 
     def do_GET(self):
         """Handle GET requests."""
+        # Validate path length
+        if len(self.path) > self.MAX_PATH_LENGTH:
+            self.send_error(414, "URI Too Long")
+            return
+
         # Check for captive portal detection first
         if self.is_portal_detection_request(self.path):
             self.handle_portal_detection(self.path)
@@ -186,8 +195,18 @@ class CaptivePortalProxyHandler(http.server.BaseHTTPRequestHandler):
 
     def do_POST(self):
         """Handle POST requests."""
-        # Read request body
+        # Validate path length
+        if len(self.path) > self.MAX_PATH_LENGTH:
+            self.send_error(414, "URI Too Long")
+            return
+
+        # Read request body with size limit
         content_length = int(self.headers.get('Content-Length', 0))
+
+        if content_length > self.MAX_BODY_SIZE:
+            self.send_error(413, "Payload Too Large")
+            return
+
         body = self.rfile.read(content_length) if content_length > 0 else None
 
         # Proxy to WiFi Connect
