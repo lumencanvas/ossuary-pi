@@ -43,6 +43,9 @@ jobs:
           image-name: ossuary-pi-${{ steps.version.outputs.version }}
           stage-list: stage0 stage1 stage2 ./stage-ossuary
 
+          # Use latest pi-gen for updated GPG keys
+          pi-gen-version: arm64
+
           # Base image settings
           release: bookworm
           compression: zip
@@ -66,7 +69,7 @@ jobs:
           # Increase disk space for build
           increase-runner-disk-size: true
 
-          # Extra host dependencies - ensure GPG keys are available
+          # Extra host dependencies
           extra-host-dependencies: gnupg debian-archive-keyring
           extra-host-modules: binfmt_misc
 
