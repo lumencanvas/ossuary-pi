@@ -52,12 +52,11 @@ jobs:
           image-name: ossuary-pi-${{ steps.version.outputs.version }}
           stage-list: stage0 stage1 stage2 ./stage-ossuary
 
-          # Use official RPi-Distro pi-gen bookworm branch
+          # Use official RPi-Distro pi-gen (defaults to appropriate branch for release)
           pi-gen-repository: RPi-Distro/pi-gen
-          pi-gen-version: bookworm
 
-          # Base image settings
-          release: bookworm
+          # Base image settings - Trixie is current Pi OS in 2026
+          release: trixie
           compression: zip
           compression-level: 6
 
