@@ -96,19 +96,28 @@ ssh pi@your-hostname.local
 
 > Can't find your Pi? Check your router's connected devices or use `ping your-hostname.local`.
 
-### Step 3: Update the System
+### Step 3: Update and Configure the System
 
 ```bash
 sudo apt-get update && sudo apt-get upgrade -y
 ```
 
-Optional but recommended — configure Pi settings:
+**Expand the filesystem** (if your SD card shows less space than expected):
+```bash
+sudo raspi-config
+```
+- **Advanced Options > Expand Filesystem** — Uses the full SD card
+- **Finish** and reboot when prompted
+
+After reboot, configure additional settings:
 ```bash
 sudo raspi-config
 ```
 - **System Options > Boot / Auto Login** — Select "Desktop Autologin"
 - **Display Options > Screen Blanking** — Disable screen blanking
 - **Finish** and reboot if prompted
+
+> Note: Raspberry Pi OS usually auto-expands the filesystem on first boot, but check with `df -h` if unsure.
 
 ### Step 4: Install Ossuary
 
