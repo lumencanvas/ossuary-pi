@@ -21,8 +21,10 @@ jobs:
         include:
           - name: arm64
             pi_gen_version: arm64
+            release: trixie
           - name: armhf
             pi_gen_version: master
+            release: bookworm  # Trixie 32-bit broken upstream (SHA-1 key issue)
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
@@ -64,8 +66,8 @@ jobs:
           pi-gen-repository: RPi-Distro/pi-gen
           pi-gen-version: ${{ matrix.pi_gen_version }}
 
-          # Base image settings - Trixie is current Pi OS in 2026
-          release: trixie
+          # Base image settings
+          release: ${{ matrix.release }}
           compression: zip
           compression-level: 6
 
@@ -117,10 +119,10 @@ jobs:
 
             ### Available Images
 
-            | Image | Architecture | Compatible Devices |
-            |-------|--------------|-------------------|
-            | `ossuary-pi-*-arm64.img.zip` | 64-bit | Pi 4, Pi 5, Pi 3 (64-bit) |
-            | `ossuary-pi-*-armhf.img.zip` | 32-bit | Pi 3, Pi Zero 2 W, older models |
+            | Image | Architecture | Base OS | Compatible Devices |
+            |-------|--------------|---------|-------------------|
+            | `ossuary-pi-*-arm64.img.zip` | 64-bit | Trixie | Pi 4, Pi 5, Pi 3 (64-bit) |
+            | `ossuary-pi-*-armhf.img.zip` | 32-bit | Bookworm | Pi 3, Pi Zero 2 W, older models |
 
             ### Installation
 
