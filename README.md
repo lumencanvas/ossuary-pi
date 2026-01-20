@@ -71,7 +71,8 @@ The easiest way to get started — a complete Raspberry Pi OS image with Ossuary
 
 Download the latest release:
 
-- **Latest**: [ossuary-pi.img.zip](https://github.com/lumencanvas/ossuary-pi/releases/latest/download/ossuary-pi.img.zip)
+- **64-bit (Pi 4/5)**: [ossuary-pi-arm64.img.zip](https://github.com/lumencanvas/ossuary-pi/releases/latest/download/ossuary-pi-arm64.img.zip)
+- **32-bit (Pi 3/Zero 2 W)**: [ossuary-pi-armhf.img.zip](https://github.com/lumencanvas/ossuary-pi/releases/latest/download/ossuary-pi-armhf.img.zip)
 - **All Releases**: [GitHub Releases](https://github.com/lumencanvas/ossuary-pi/releases)
 
 ### Step 2: Flash with Raspberry Pi Imager
