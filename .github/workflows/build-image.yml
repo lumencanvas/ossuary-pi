@@ -15,6 +15,14 @@ on:
 jobs:
   build:
     runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - name: arm64
+            pi_gen_version: arm64
+          - name: armhf
+            pi_gen_version: master
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
@@ -49,11 +57,12 @@ jobs:
         uses: usimd/pi-gen-action@v1
         id: build
         with:
-          image-name: ossuary-pi-${{ steps.version.outputs.version }}
-          stage-list: stage0 stage1 stage2 ./stage-ossuary
+          image-name: ossuary-pi-${{ steps.version.outputs.version }}-${{ matrix.name }}
+          stage-list: stage0 stage1 stage2 stage3 ./stage-ossuary
 
-          # Use official RPi-Distro pi-gen (defaults to appropriate branch for release)
+          # Use official RPi-Distro pi-gen
           pi-gen-repository: RPi-Distro/pi-gen
+          pi-gen-version: ${{ matrix.pi_gen_version }}
 
           # Base image settings - Trixie is current Pi OS in 2026
           release: trixie
@@ -63,6 +72,7 @@ jobs:
           # System configuration (users can override with Pi Imager)
           hostname: ossuary
           username: pi
+          password: ossuary
           locale: en_US.UTF-8
           keyboard-keymap: us
           keyboard-layout: English (US)
@@ -91,7 +101,7 @@ jobs:
       - name: Upload artifact
         uses: actions/upload-artifact@v4
         with:
-          name: ossuary-pi-image
+          name: ossuary-pi-image-${{ matrix.name }}
           path: ${{ steps.build.outputs.image-path }}
           retention-days: 7
 
@@ -103,15 +113,24 @@ jobs:
           body: |
             ## Ossuary Pi ${{ steps.version.outputs.version }}
 
-            Pre-built Raspberry Pi image with Ossuary pre-installed.
+            Pre-built Raspberry Pi desktop images with Ossuary pre-installed.
+
+            ### Available Images
+
+            | Image | Architecture | Compatible Devices |
+            |-------|--------------|-------------------|
+            | `ossuary-pi-*-arm64.img.zip` | 64-bit | Pi 4, Pi 5, Pi 3 (64-bit) |
+            | `ossuary-pi-*-armhf.img.zip` | 32-bit | Pi 3, Pi Zero 2 W, older models |
 
             ### Installation
 
-            1. Download `ossuary-pi-${{ steps.version.outputs.version }}.img.zip`
+            1. Download the appropriate image for your Pi
             2. Open Raspberry Pi Imager
             3. Choose OS → Use custom → Select the downloaded file
             4. Configure your settings (hostname, WiFi, SSH) in Pi Imager
             5. Write to SD card
+
+            Default credentials: `pi` / `ossuary` (override in Pi Imager)
 
             ### First Boot
 
@@ -120,9 +139,9 @@ jobs:
 
             ### Latest Release
 
-            Always get the latest version:
+            Always get the latest 64-bit version:
             ```
-            https://github.com/lumencanvas/ossuary-pi/releases/latest/download/ossuary-pi.img.zip
+            https://github.com/lumencanvas/ossuary-pi/releases/latest/download/ossuary-pi-arm64.img.zip
             ```
           files: |
             ${{ steps.build.outputs.image-path }}
@@ -134,13 +153,13 @@ jobs:
         if: steps.version.outputs.is_release == 'true'
         run: |
           # Copy with generic name for stable "latest" URL
-          cp "${{ steps.build.outputs.image-path }}" "ossuary-pi.img.zip" || true
+          cp "${{ steps.build.outputs.image-path }}" "ossuary-pi-${{ matrix.name }}.img.zip" || true
 
       - name: Upload generic filename to release
         if: steps.version.outputs.is_release == 'true'
         uses: softprops/action-gh-release@v1
         with:
-          files: ossuary-pi.img.zip
+          files: ossuary-pi-${{ matrix.name }}.img.zip
           fail_on_unmatched_files: false
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

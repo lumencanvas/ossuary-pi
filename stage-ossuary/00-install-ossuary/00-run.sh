@@ -257,7 +257,13 @@ fi
 # Disable SSH warning popups
 rm -f /etc/profile.d/sshpwd.sh 2>/dev/null || true
 rm -f /etc/xdg/lxsession/LXDE-pi/sshpwd.sh 2>/dev/null || true
+
+# Disable piwiz (first-run wizard)
 rm -f /etc/xdg/autostart/piwiz.desktop 2>/dev/null || true
+
+# Prevent userconf from running on first boot (we already have user/password set)
+touch /boot/firmware/.skip-userconf 2>/dev/null || true
+touch /boot/.skip-userconf 2>/dev/null || true
 
 # Disable screen blanking
 if command -v raspi-config &>/dev/null; then
@@ -267,7 +273,15 @@ fi
 # Download and install wifi-connect binary
 echo "Downloading WiFi Connect..."
 WIFI_CONNECT_VERSION="v4.11.84"
-WIFI_CONNECT_ARCH="aarch64-unknown-linux-gnu"
+
+# Detect architecture for wifi-connect download
+if [ "$(dpkg --print-architecture)" = "arm64" ]; then
+    WIFI_CONNECT_ARCH="aarch64-unknown-linux-gnu"
+else
+    WIFI_CONNECT_ARCH="armv7-unknown-linux-gnueabihf"
+fi
+echo "Detected architecture: $WIFI_CONNECT_ARCH"
+
 DOWNLOAD_URL="https://github.com/balena-os/wifi-connect/releases/download/${WIFI_CONNECT_VERSION}/wifi-connect-${WIFI_CONNECT_ARCH}.tar.gz"
 
 cd /tmp
