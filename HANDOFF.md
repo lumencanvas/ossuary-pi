@@ -1,50 +1,77 @@
-# Build Handoff - v1.3.1
+# Build Handoff - v1.4.0
 
 ## Current Status
 
-**Build**: https://github.com/lumencanvas/ossuary-pi/actions/runs/21164905744
+**Release**: https://github.com/lumencanvas/ossuary-pi/releases/tag/v1.4.0
 
-| Job | Status | Notes |
-|-----|--------|-------|
-| arm64 | in_progress | Should complete ~60 min total |
-| armhf | **FAILED** | pi-gen-action doesn't support 32-bit on GH Actions |
+Build should be triggered automatically by the tag push. Check status:
+```bash
+gh run list --limit 3
+```
 
-## armhf Failure Root Cause
+## What Changed in v1.4.0
 
-The `master` branch of pi-gen (for 32-bit) requires an i386 Docker environment. GitHub Actions runners are amd64. The pi-gen-action uses `i386/debian:trixie` as its Docker base regardless of our `release: bookworm` setting.
+### Features
+- Delete button works for ALL saved networks (including system-saved via NetworkManager)
+- Welcome page shows live connection status (SSID + hostname)
+- IP address fallback when `.local` hostname doesn't resolve
+- Schedule rules now execute (refresh/restart at specified times)
 
-**This is a fundamental limitation of pi-gen-action on GitHub Actions - 32-bit builds don't work.**
+### Security
+- XSS protection for WiFi network names (`escapeHtml()`)
+- Warning before deleting currently connected network
 
-## Recommended Fix
+### Build Fixes
+- **Pi Imager customization works** - Removed `.skip-userconf` creation that was blocking firstrun.sh
+- wifi-connect download with 3x retry logic and gzip validation
+- Added `wireless-tools` and `iproute2` packages
 
-Remove armhf from CI, build 64-bit only. Users needing 32-bit can:
-- Build locally with pi-gen
-- Use the manual install script on existing Pi OS
+### Runtime Fixes
+- `--remote-debugging-port=9222` added to Chromium for CDP page refresh
+- Multiple fallback methods for WiFi detection (iwgetid → nmcli → /sys)
+- Schedule state persists across reboots (`/var/lib/ossuary/` instead of `/run/`)
+- Proper error feedback in UI instead of silent failures
+
+## Key Files Modified
+
+| File | Changes |
+|------|---------|
+| `custom-ui/index.html` | escapeHtml, delete for all networks, error handling |
+| `custom-ui/welcome.html` | Connection status view, IP fallback |
+| `scripts/process-manager.sh` | Remote debugging port |
+| `scripts/connection-monitor.sh` | Schedule execution, persistent state |
+| `scripts/wifi-connect-manager.sh` | Robust WiFi detection fallbacks |
+| `stage-ossuary/00-install-ossuary/00-run.sh` | Pi Imager fix, wifi-connect retry |
+| `stage-ossuary/00-install-ossuary/00-packages` | wireless-tools, iproute2 |
 
 ## Quick Commands
 
 ```bash
-# Check arm64 status
-gh run view 21164905744 --json jobs --jq '.jobs[] | select(.name | contains("arm64")) | "\(.status) \(.conclusion // "")"'
+# Check build status
+gh run list --limit 3
 
-# After arm64 completes, check release
-gh release view v1.3.1
+# View release
+gh release view v1.4.0
 
-# If release upload fails, manual upload:
-gh run download 21164905744 --name ossuary-pi-image-arm64 --dir /tmp/release
-gh release upload v1.3.1 /tmp/release/*.zip --clobber
+# Download artifacts if needed
+gh run download <run-id> --name ossuary-pi-image-arm64 --dir /tmp/release
+
+# Manual upload if release upload fails
+gh release upload v1.4.0 /tmp/release/*.zip --clobber
 ```
 
-## To Remove armhf from CI
+## Known Limitations
 
-Edit `.github/workflows/build-image.yml`, remove armhf from matrix:
-```yaml
-matrix:
-  include:
-    - name: arm64
-      pi_gen_version: arm64
-      release: trixie
-    # armhf removed - doesn't work on GH Actions
-```
+- **armhf (32-bit) builds**: Don't work on GitHub Actions (pi-gen-action limitation)
+- **Schedule profile switching**: Rules are saved but "switch_profile" action only logs, doesn't change startup command yet
+- **Connection loss overlay**: `show_overlay` behavior option exists but not implemented (may not be needed)
 
-Update README to only list arm64 download.
+## Testing Checklist
+
+After build completes:
+1. [ ] Flash image with Pi Imager + WiFi customization → verify auto-connects
+2. [ ] Boot without customization → verify welcome page shows
+3. [ ] Connect to Ossuary-Setup → verify captive portal works
+4. [ ] Delete a system-saved network → verify it's removed from nmcli
+5. [ ] Set a schedule rule → verify it triggers at the right time
+6. [ ] Disconnect network → reconnect → verify page refreshes via CDP
