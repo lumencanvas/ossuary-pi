@@ -223,45 +223,74 @@
         </div>
         <p class="subtitle">Your kiosk is ready to be configured</p>
 
-        <div class="card">
-            <h2>Get Connected</h2>
+        <!-- Setup view - shown when not connected to WiFi -->
+        <div id="setup-view">
+            <div class="card">
+                <h2>Get Connected</h2>
 
-            <div class="step">
-                <div class="step-number">1</div>
-                <div class="step-content">
-                    <h3>Connect to the Setup Network</h3>
-                    <p>On your phone or laptop, join the WiFi network:</p>
-                    <span class="highlight">Ossuary-Setup</span>
+                <div class="step">
+                    <div class="step-number">1</div>
+                    <div class="step-content">
+                        <h3>Connect to the Setup Network</h3>
+                        <p>On your phone or laptop, join the WiFi network:</p>
+                        <span class="highlight">Ossuary-Setup</span>
+                    </div>
+                </div>
+
+                <div class="step">
+                    <div class="step-number">2</div>
+                    <div class="step-content">
+                        <h3>Open the Configuration Page</h3>
+                        <p>A captive portal should open automatically. If not, visit:</p>
+                        <span class="highlight">http://192.168.42.1</span>
+                    </div>
+                </div>
+
+                <div class="step">
+                    <div class="step-number">3</div>
+                    <div class="step-content">
+                        <h3>Configure Your Kiosk</h3>
+                        <p>Select your WiFi network and set your startup command.</p>
+                    </div>
                 </div>
             </div>
 
-            <div class="step">
-                <div class="step-number">2</div>
-                <div class="step-content">
-                    <h3>Open the Configuration Page</h3>
-                    <p>A captive portal should open automatically. If not, visit:</p>
-                    <span class="highlight">http://192.168.42.1</span>
-                </div>
+            <div class="card">
+                <h2>Already on the Network?</h2>
+                <p style="font-size: 0.875rem; color: var(--muted); margin-bottom: 0.5rem;">Access the control panel at:</p>
+                <span class="highlight" id="hostname-url">http://ossuary.local:8081</span>
             </div>
 
-            <div class="step">
-                <div class="step-number">3</div>
-                <div class="step-content">
-                    <h3>Configure Your Kiosk</h3>
-                    <p>Select your WiFi network and set your startup command.</p>
-                </div>
+            <div class="status">
+                <div class="pulse"></div>
+                <span>Waiting for configuration...</span>
             </div>
         </div>
 
-        <div class="card">
-            <h2>Already on the Network?</h2>
-            <p style="font-size: 0.875rem; color: var(--muted); margin-bottom: 0.5rem;">Access the control panel at:</p>
-            <span class="highlight" id="hostname-url">http://ossuary.local:8081</span>
-        </div>
+        <!-- Connected view - shown when WiFi is connected -->
+        <div id="connected-view" style="display: none;">
+            <div class="card" style="background: linear-gradient(135deg, #0d9488 0%, #0f766e 100%); color: white;">
+                <h2 style="color: rgba(255,255,255,0.9);">Connected</h2>
+                <div style="font-size: clamp(0.8rem, 3vmin, 1.1rem); font-weight: 500; margin-bottom: 0.5rem;">
+                    Network: <span id="connected-ssid" style="font-family: 'Space Mono', monospace;">—</span>
+                </div>
+            </div>
 
-        <div class="status">
-            <div class="pulse"></div>
-            <span>Waiting for configuration...</span>
+            <div class="card">
+                <h2>Configure Your Display</h2>
+                <p style="font-size: clamp(0.7rem, 2.5vmin, 0.9rem); color: var(--muted); margin-bottom: 0.75rem;">
+                    Open the control panel to set what this kiosk displays:
+                </p>
+                <span class="highlight" id="config-url" style="font-size: clamp(0.65rem, 2.2vmin, 0.85rem);">http://ossuary.local:8081</span>
+                <p id="config-url-fallback" style="font-size: clamp(0.55rem, 1.8vmin, 0.7rem); color: var(--muted); margin-top: 0.5rem; display: none;">
+                    Or use IP: <span class="highlight" id="config-ip" style="font-size: clamp(0.55rem, 1.8vmin, 0.7rem);"></span>
+                </p>
+            </div>
+
+            <div class="status">
+                <div class="pulse" style="background: var(--teal);"></div>
+                <span>Waiting for display configuration...</span>
+            </div>
         </div>
 
         <div class="footer">
@@ -270,23 +299,80 @@
     </div>
 
     <script>
-        // Auto-refresh to check if connected
-        // When user configures a command, this page will be replaced
-        setInterval(function() {
-            fetch('/api/config')
-                .then(r => r.json())
-                .then(data => {
-                    if (data.startup_command && data.startup_command.trim() !== '') {
-                        // Config set, reload to let process manager show the right thing
-                        location.reload();
-                    }
-                })
-                .catch(() => {
-                    // API not available, try again later
-                });
-        }, 5000);
+        let lastWifiState = null;
 
-        // Try to get actual hostname
+        // Check network status and toggle views
+        async function checkNetworkStatus() {
+            try {
+                const response = await fetch('/api/status');
+                if (!response.ok) throw new Error('Status unavailable');
+                const data = await response.json();
+
+                if (data.wifi_connected && data.ssid) {
+                    // Also fetch system info for IP address
+                    let ip = null;
+                    try {
+                        const infoResp = await fetch('/api/system/info');
+                        if (infoResp.ok) {
+                            const info = await infoResp.json();
+                            ip = info.ip;
+                        }
+                    } catch (e) {}
+
+                    showConnectedView(data.ssid, data.hostname || 'ossuary', ip);
+                } else {
+                    showSetupView();
+                }
+            } catch (e) {
+                // API not available or error - show setup view
+                showSetupView();
+            }
+        }
+
+        function showConnectedView(ssid, hostname, ip) {
+            document.getElementById('setup-view').style.display = 'none';
+            document.getElementById('connected-view').style.display = 'block';
+            document.getElementById('connected-ssid').textContent = ssid;
+            document.getElementById('config-url').textContent =
+                'http://' + hostname + '.local:8081';
+
+            // Show IP address as fallback if available
+            if (ip) {
+                document.getElementById('config-ip').textContent = 'http://' + ip + ':8081';
+                document.getElementById('config-url-fallback').style.display = 'block';
+            }
+        }
+
+        function showSetupView() {
+            document.getElementById('setup-view').style.display = 'block';
+            document.getElementById('connected-view').style.display = 'none';
+        }
+
+        // Check for startup command and reload when configured
+        async function checkStartupCommand() {
+            try {
+                const response = await fetch('/api/config');
+                if (!response.ok) return;
+                const data = await response.json();
+
+                if (data.startup_command && data.startup_command.trim() !== '') {
+                    // Config set, reload to let process manager show the right thing
+                    location.reload();
+                }
+            } catch (e) {
+                // API not available, try again later
+            }
+        }
+
+        // Initial checks
+        checkNetworkStatus();
+        checkStartupCommand();
+
+        // Poll for status updates
+        setInterval(checkNetworkStatus, 5000);
+        setInterval(checkStartupCommand, 5000);
+
+        // Try to get actual hostname for setup view
         try {
             const hostname = location.hostname || 'ossuary.local';
             if (hostname && hostname !== '192.168.42.1') {

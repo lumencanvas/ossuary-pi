@@ -38,23 +38,40 @@ has_internet() {
 
 # Check if we have WiFi connection (not necessarily internet)
 has_wifi_connection() {
-    # Check if any WiFi interface is connected
-    if iwgetid -r >/dev/null 2>&1; then
-        local ssid=$(iwgetid -r)
-        if [ -n "$ssid" ]; then
-            log "Connected to WiFi: $ssid"
-            return 0
-        fi
-    fi
-
-    # Alternative check using NetworkManager
-    if command -v nmcli >/dev/null; then
-        if nmcli -t -f WIFI g status 2>/dev/null | grep -q "enabled"; then
-            if nmcli -t -f STATE,CONNECTION device status 2>/dev/null | grep "wifi" | grep -q "connected"; then
+    # Method 1: Use iwgetid if available (most reliable for SSID)
+    if command -v iwgetid >/dev/null 2>&1; then
+        if iwgetid -r >/dev/null 2>&1; then
+            local ssid=$(iwgetid -r 2>/dev/null)
+            if [ -n "$ssid" ]; then
+                log "Connected to WiFi: $ssid"
                 return 0
             fi
         fi
     fi
+
+    # Method 2: Use NetworkManager nmcli
+    if command -v nmcli >/dev/null 2>&1; then
+        if nmcli -t -f WIFI g status 2>/dev/null | grep -q "enabled"; then
+            if nmcli -t -f STATE,TYPE device status 2>/dev/null | grep "wifi" | grep -q "connected"; then
+                local ssid=$(nmcli -t -f ACTIVE,SSID device wifi list 2>/dev/null | grep "^yes:" | cut -d: -f2 | head -1)
+                if [ -n "$ssid" ]; then
+                    log "Connected to WiFi (via nmcli): $ssid"
+                    return 0
+                fi
+                return 0
+            fi
+        fi
+    fi
+
+    # Method 3: Check /sys interface state directly
+    for iface in /sys/class/net/wlan*; do
+        if [ -e "$iface/operstate" ]; then
+            if grep -q "up" "$iface/operstate" 2>/dev/null; then
+                log "WiFi interface $(basename $iface) is up"
+                return 0
+            fi
+        fi
+    done
 
     return 1
 }

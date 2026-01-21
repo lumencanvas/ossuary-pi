@@ -143,6 +143,11 @@ enhance_chromium_command() {
         enhanced=$(echo "$enhanced" | sed 's/chromium\(-browser\)\?/& --user-data-dir=\/home\/pi\/.config\/chromium-kiosk/')
     fi
 
+    # Add remote debugging port for Chrome DevTools Protocol (used by connection-monitor for refresh)
+    if ! echo "$command" | grep -q "remote-debugging-port"; then
+        enhanced=$(echo "$enhanced" | sed 's/chromium\(-browser\)\?/& --remote-debugging-port=9222/')
+    fi
+
     # Add Wayland-specific flags if running on Wayland (Pi OS 2024+ default)
     if [ "$display_type" = "wayland" ]; then
         if ! echo "$command" | grep -q "ozone-platform"; then
@@ -705,7 +710,7 @@ show_welcome_page() {
         log "Using X11 display mode"
     fi
 
-    local chromium_cmd="chromium --kiosk --password-store=basic --disable-session-crashed-bubble --disable-infobars --noerrdialogs --no-first-run --disable-default-apps --disable-notifications --use-gl=egl --user-data-dir=/home/${run_user}/.config/chromium-kiosk --check-for-update-interval=31536000 $platform_flags file://${WELCOME_PAGE}"
+    local chromium_cmd="chromium --kiosk --password-store=basic --disable-session-crashed-bubble --disable-infobars --noerrdialogs --no-first-run --disable-default-apps --disable-notifications --use-gl=egl --user-data-dir=/home/${run_user}/.config/chromium-kiosk --check-for-update-interval=31536000 --remote-debugging-port=9222 $platform_flags file://${WELCOME_PAGE}"
 
     log "Launching welcome page: $chromium_cmd"
 

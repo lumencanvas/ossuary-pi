@@ -82,6 +82,7 @@ echo "Installing Ossuary Pi (inside chroot)..."
 # Create directories
 mkdir -p "$CONFIG_DIR"
 mkdir -p /run/ossuary
+mkdir -p /var/lib/ossuary
 
 # Create empty config (user will configure via welcome page or Pi Imager WiFi)
 cat > "$CONFIG_DIR/config.json" << 'CONFIGEOF'
@@ -261,9 +262,9 @@ rm -f /etc/xdg/lxsession/LXDE-pi/sshpwd.sh 2>/dev/null || true
 # Disable piwiz (first-run wizard)
 rm -f /etc/xdg/autostart/piwiz.desktop 2>/dev/null || true
 
-# Prevent userconf from running on first boot (we already have user/password set)
-touch /boot/firmware/.skip-userconf 2>/dev/null || true
-touch /boot/.skip-userconf 2>/dev/null || true
+# NOTE: We intentionally do NOT create .skip-userconf files here.
+# This allows Pi Imager customizations (WiFi, hostname, SSH keys) to work properly.
+# The firstrun.sh script from Pi Imager needs to execute to apply those settings.
 
 # Disable screen blanking
 if command -v raspi-config &>/dev/null; then
@@ -285,16 +286,44 @@ echo "Detected architecture: $WIFI_CONNECT_ARCH"
 DOWNLOAD_URL="https://github.com/balena-os/wifi-connect/releases/download/${WIFI_CONNECT_VERSION}/wifi-connect-${WIFI_CONNECT_ARCH}.tar.gz"
 
 cd /tmp
-wget -q "$DOWNLOAD_URL" -O wifi-connect.tar.gz
-tar -xzf wifi-connect.tar.gz
-mv wifi-connect /usr/local/bin/
-chmod +x /usr/local/bin/wifi-connect
-rm -f wifi-connect.tar.gz
 
-if command -v wifi-connect &>/dev/null; then
-    echo "WiFi Connect installed successfully"
+# Download with retry logic
+DOWNLOAD_SUCCESS=false
+for attempt in 1 2 3; do
+    echo "Download attempt $attempt..."
+    if wget -q --timeout=60 "$DOWNLOAD_URL" -O wifi-connect.tar.gz; then
+        # Verify the download is a valid gzip file
+        if gzip -t wifi-connect.tar.gz 2>/dev/null; then
+            DOWNLOAD_SUCCESS=true
+            break
+        else
+            echo "Downloaded file is corrupted, retrying..."
+            rm -f wifi-connect.tar.gz
+        fi
+    else
+        echo "Download failed, retrying in 5 seconds..."
+        sleep 5
+    fi
+done
+
+if [ "$DOWNLOAD_SUCCESS" = false ]; then
+    echo "ERROR: Failed to download WiFi Connect after 3 attempts"
+    echo "The captive portal feature will not work without wifi-connect"
+    # Don't fail the build, but log clearly
 else
-    echo "WARNING: WiFi Connect installation may have failed"
+    tar -xzf wifi-connect.tar.gz
+    mv wifi-connect /usr/local/bin/
+    chmod +x /usr/local/bin/wifi-connect
+    rm -f wifi-connect.tar.gz
+
+    # Verify the binary is executable and shows version
+    if /usr/local/bin/wifi-connect --version >/dev/null 2>&1; then
+        echo "WiFi Connect installed successfully: $(/usr/local/bin/wifi-connect --version 2>&1 || echo 'version unknown')"
+    elif command -v wifi-connect &>/dev/null; then
+        echo "WiFi Connect installed (version check not available)"
+    else
+        echo "WARNING: WiFi Connect binary not found after installation"
+    fi
 fi
 
 echo "Ossuary Pi installation complete!"

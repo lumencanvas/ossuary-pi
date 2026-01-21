@@ -2,15 +2,21 @@
 
 # Ossuary Connection Monitor
 # Monitors network connectivity and triggers actions on connection events
+# Also handles time-based schedule rules
 
 CONFIG_FILE="/etc/ossuary/config.json"
 LOG_FILE="/var/log/ossuary-connection.log"
 STATE_FILE="/run/ossuary/connection-state"
+# Schedule state persists across reboots (unlike /run which is tmpfs)
+SCHEDULE_STATE_FILE="/var/lib/ossuary/schedule-last-check"
 CHROMIUM_DEBUG_PORT=9222
 
 # Ensure directories exist
 mkdir -p "$(dirname "$LOG_FILE")"
 mkdir -p "$(dirname "$STATE_FILE")"
+mkdir -p "$(dirname "$SCHEDULE_STATE_FILE")"
+# Set permissions for persistent schedule state
+chmod 755 "$(dirname "$SCHEDULE_STATE_FILE")" 2>/dev/null || true
 
 # Initialize state
 LAST_STATE="unknown"
@@ -84,6 +90,123 @@ except:
     else
         echo 0
     fi
+}
+
+# Check and execute schedule rules
+# Returns the action to execute if a rule matches, empty otherwise
+check_schedule_rules() {
+    if [ ! -f "$CONFIG_FILE" ]; then
+        return
+    fi
+
+    python3 -c "
+import json
+from datetime import datetime
+
+try:
+    with open('$CONFIG_FILE', 'r') as f:
+        config = json.load(f)
+
+    schedule = config.get('schedule', {})
+    if not schedule.get('enabled', False):
+        exit(0)
+
+    rules = schedule.get('rules', [])
+    if not rules:
+        exit(0)
+
+    now = datetime.now()
+    current_time = now.strftime('%H:%M')
+    current_hour_min = now.hour * 60 + now.minute
+
+    # Map day names to datetime weekday (0=Monday, 6=Sunday)
+    day_map = {'mon': 0, 'tue': 1, 'wed': 2, 'thu': 3, 'fri': 4, 'sat': 5, 'sun': 6}
+    current_day = now.weekday()
+
+    # Read last check state to avoid re-triggering
+    last_check = {}
+    try:
+        with open('$SCHEDULE_STATE_FILE', 'r') as f:
+            last_check = json.load(f)
+    except:
+        pass
+
+    for rule in rules:
+        if not rule.get('enabled', True):
+            continue
+
+        rule_id = rule.get('id', '')
+        trigger = rule.get('trigger', {})
+
+        if trigger.get('type') != 'time':
+            continue
+
+        trigger_time = trigger.get('time', '')
+        trigger_days = trigger.get('days', [])
+
+        if not trigger_time or not trigger_days:
+            continue
+
+        # Check if today is in the trigger days
+        current_day_name = ['mon', 'tue', 'wed', 'thu', 'fri', 'sat', 'sun'][current_day]
+        if current_day_name not in trigger_days:
+            continue
+
+        # Check if current time matches trigger time (within 1 minute window)
+        try:
+            t_hour, t_min = map(int, trigger_time.split(':'))
+            trigger_mins = t_hour * 60 + t_min
+            if abs(current_hour_min - trigger_mins) > 1:
+                continue
+        except:
+            continue
+
+        # Check if we already triggered this rule in this minute
+        last_trigger_key = f'{rule_id}_{current_time}'
+        if last_check.get('last_trigger') == last_trigger_key:
+            continue
+
+        # Rule matches! Save state and output action
+        last_check['last_trigger'] = last_trigger_key
+        with open('$SCHEDULE_STATE_FILE', 'w') as f:
+            json.dump(last_check, f)
+
+        action = rule.get('action', {})
+        action_type = action.get('type', 'refresh')
+        profile = action.get('profile', '')
+
+        print(f'{action_type}:{profile}')
+        break  # Only execute one rule per check
+
+except Exception as e:
+    pass
+" 2>/dev/null
+}
+
+# Execute a schedule action
+execute_schedule_action() {
+    local action="$1"
+    local action_type="${action%%:*}"
+    local profile="${action#*:}"
+
+    log "Executing schedule action: $action_type (profile: $profile)"
+
+    case "$action_type" in
+        "refresh")
+            refresh_chromium
+            ;;
+        "restart")
+            send_hup_to_process_manager
+            ;;
+        "switch_profile")
+            # For now, just log - full profile switching requires startup command change
+            log "Profile switch requested: $profile (not fully implemented)"
+            # Could implement by updating config and signaling process manager
+            ;;
+        *)
+            log "Unknown schedule action: $action_type"
+            ;;
+    esac
 }
 
 # Send SIGHUP to process manager safely
@@ -297,6 +420,13 @@ main() {
                     refresh_chromium
                     last_refresh_time=$now
                 fi
+            fi
+
+            # Check time-based schedule rules (only when connected)
+            local schedule_action
+            schedule_action=$(check_schedule_rules)
+            if [ -n "$schedule_action" ]; then
+                execute_schedule_action "$schedule_action"
             fi
         fi
 

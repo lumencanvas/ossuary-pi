@@ -8,3 +8,5 @@ chromium
 xdotool
 dnsmasq
 hostapd
+wireless-tools
+iproute2

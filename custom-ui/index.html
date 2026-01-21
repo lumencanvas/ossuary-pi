@@ -633,6 +633,11 @@
 
             <button class="btn-primary" onclick="showAddScheduleModal()">Add Schedule Rule</button>
 
+            <div class="info-box" style="border-color: var(--teal); margin-top: var(--space-lg);">
+                <h3>Supported Actions</h3>
+                <p>Refresh and Restart actions work immediately. Profile switching is saved but requires manual application.</p>
+            </div>
+
             <div class="info-box">
                 <h3>How Scheduling Works</h3>
                 <p>Create rules to switch displays or refresh at specific times. Great for galleries, signage, and scheduled content.</p>
@@ -895,8 +900,9 @@
                     const signal = network.signal || 0;
                     const item = document.createElement('div');
                     item.className = 'network-item';
-                    item.innerHTML = `<div><div class="network-name">${ssid}</div><div class="network-meta">${signal}% signal</div></div><div class="network-icon">${network.encrypted !== false ? lockIcon : openIcon}</div>`;
-                    item.onclick = () => selectWifiNetwork(ssid, item);
+                    item.dataset.ssid = ssid; // Store raw SSID for onclick
+                    item.innerHTML = `<div><div class="network-name">${escapeHtml(ssid)}</div><div class="network-meta">${signal}% signal</div></div><div class="network-icon">${network.encrypted !== false ? lockIcon : openIcon}</div>`;
+                    item.onclick = () => selectWifiNetwork(item.dataset.ssid, item);
                     container.appendChild(item);
                 });
             } catch (e) {
@@ -968,6 +974,13 @@
             }
         }
 
+        // Escape HTML special characters for safe insertion
+        function escapeHtml(str) {
+            const div = document.createElement('div');
+            div.textContent = str;
+            return div.innerHTML;
+        }
+
         function renderSavedNetworks() {
             const container = document.getElementById('saved-networks-list');
             if (!savedNetworks.length) {
@@ -975,29 +988,37 @@
                 return;
             }
 
-            container.innerHTML = savedNetworks.map(n => `
+            container.innerHTML = savedNetworks.map(n => {
+                const escapedSsid = escapeHtml(n.ssid);
+                const escapedNotes = n.notes ? escapeHtml(n.notes) : '';
+                return `
                 <div class="saved-network-item">
                     <div class="saved-network-info">
-                        <div class="saved-network-ssid">${n.ssid}</div>
-                        ${n.notes ? `<div class="saved-network-notes">${n.notes}</div>` : ''}
+                        <div class="saved-network-ssid">${escapedSsid}</div>
+                        ${n.notes ? `<div class="saved-network-notes">${escapedNotes}</div>` : ''}
                         <div class="saved-network-meta">${n.from_nm ? 'Saved in system' : (n.last_connected ? 'Last: ' + new Date(n.last_connected).toLocaleDateString() : 'Never connected')}</div>
                     </div>
                     <div class="network-actions">
-                        <button class="btn-small" onclick="connectSavedNetwork('${n.ssid}')">Connect</button>
-                        ${!n.from_nm ? `<button class="btn-small danger" onclick="deleteNetwork('${n.ssid}')">Delete</button>` : ''}
+                        <button class="btn-small" onclick="connectSavedNetwork(this.dataset.ssid)" data-ssid="${escapedSsid}">Connect</button>
+                        <button class="btn-small danger" onclick="deleteNetwork(this.dataset.ssid)" data-ssid="${escapedSsid}">Delete</button>
                     </div>
                 </div>
-            `).join('');
+            `}).join('');
         }
 
         async function saveNetworkToList(ssid, password, notes) {
             try {
-                await fetch('/api/saved-networks', {
+                const response = await fetch('/api/saved-networks', {
                     method: 'POST',
                     headers: {'Content-Type': 'application/json'},
                     body: JSON.stringify({ ssid, password, notes, auto_connect: true })
                 });
-            } catch (e) {}
+                if (!response.ok) {
+                    console.warn('Failed to save network to list:', ssid);
+                }
+            } catch (e) {
+                console.warn('Error saving network to list:', e.message);
+            }
         }
 
         async function saveNewNetwork() {
@@ -1041,15 +1062,37 @@
         }
 
         async function deleteNetwork(ssid) {
-            if (!confirm(`Delete "${ssid}"?`)) return;
+            // Check if this is the currently connected network
+            let isCurrentNetwork = false;
             try {
-                await fetch('/api/saved-networks/delete', {
+                const statusResp = await fetch('/api/status');
+                if (statusResp.ok) {
+                    const status = await statusResp.json();
+                    isCurrentNetwork = status.wifi_connected && status.ssid === ssid;
+                }
+            } catch (e) {}
+
+            const message = isCurrentNetwork
+                ? `"${ssid}" is your current network. Deleting it will disconnect you and the Pi will switch to hotspot mode. Continue?`
+                : `Delete "${ssid}"?`;
+
+            if (!confirm(message)) return;
+
+            try {
+                const response = await fetch('/api/saved-networks/delete', {
                     method: 'POST',
                     headers: {'Content-Type': 'application/json'},
                     body: JSON.stringify({ ssid, remove_from_system: true })
                 });
-                loadSavedNetworks();
-            } catch (e) {}
+                if (response.ok) {
+                    loadSavedNetworks();
+                } else {
+                    const data = await response.json();
+                    alert(data.error || 'Failed to delete network');
+                }
+            } catch (e) {
+                alert('Error deleting network: ' + e.message);
+            }
         }
 
         // Display presets
@@ -1229,12 +1272,20 @@
         async function toggleSchedule() {
             const enabled = document.getElementById('schedule-enabled').checked;
             try {
-                await fetch('/api/schedule', {
+                const response = await fetch('/api/schedule', {
                     method: 'POST',
                     headers: {'Content-Type': 'application/json'},
                     body: JSON.stringify({ enabled, rules: scheduleRules })
                 });
-            } catch (e) {}
+                if (!response.ok) {
+                    alert('Failed to update schedule setting');
+                    // Revert checkbox
+                    document.getElementById('schedule-enabled').checked = !enabled;
+                }
+            } catch (e) {
+                alert('Error updating schedule: ' + e.message);
+                document.getElementById('schedule-enabled').checked = !enabled;
+            }
         }
 
         async function saveScheduleRule() {
@@ -1284,15 +1335,25 @@
 
         async function deleteScheduleRule(idx) {
             if (!confirm('Delete this rule?')) return;
-            scheduleRules.splice(idx, 1);
+            const deletedRule = scheduleRules.splice(idx, 1)[0];
             try {
-                await fetch('/api/schedule', {
+                const response = await fetch('/api/schedule', {
                     method: 'POST',
                     headers: {'Content-Type': 'application/json'},
                     body: JSON.stringify({ enabled: document.getElementById('schedule-enabled').checked, rules: scheduleRules })
                 });
+                if (!response.ok) {
+                    // Restore the rule if save failed
+                    scheduleRules.splice(idx, 0, deletedRule);
+                    alert('Failed to delete rule');
+                }
                 renderScheduleRules();
-            } catch (e) {}
+            } catch (e) {
+                // Restore the rule if save failed
+                scheduleRules.splice(idx, 0, deletedRule);
+                alert('Error deleting rule: ' + e.message);
+                renderScheduleRules();
+            }
         }
 
         // Timezone
