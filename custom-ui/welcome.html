@@ -300,6 +300,7 @@
 
     <script>
         let lastWifiState = null;
+        let hasReloaded = sessionStorage.getItem('ossuary_reloaded') === 'true';
 
         // Check network status and toggle views
         async function checkNetworkStatus() {
@@ -355,8 +356,9 @@
                 if (!response.ok) return;
                 const data = await response.json();
 
-                if (data.startup_command && data.startup_command.trim() !== '') {
-                    // Config set, reload to let process manager show the right thing
+                if (data.startup_command && data.startup_command.trim() !== '' && !hasReloaded) {
+                    // Config set, reload once to let process manager show the right thing
+                    sessionStorage.setItem('ossuary_reloaded', 'true');
                     location.reload();
                 }
             } catch (e) {

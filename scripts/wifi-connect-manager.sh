@@ -7,6 +7,10 @@
 CONFIG_FILE="/etc/ossuary/config.json"
 LOG_FILE="/var/log/wifi-connect-manager.log"
 CHECK_INTERVAL=30  # Check every 30 seconds
+
+# Detect WiFi interface (supports non-standard names like wlan1, wlp2s0, etc.)
+WIFI_IFACE=$(iw dev 2>/dev/null | awk '$1=="Interface"{print $2}' | head -1)
+WIFI_IFACE="${WIFI_IFACE:-wlan0}"  # fallback
 MAX_WAIT_FOR_NETWORK=180  # Wait up to 3 minutes for network on boot
 INITIAL_WAIT=15  # Wait 15 seconds before first check to let NetworkManager initialize
 
@@ -58,7 +62,7 @@ has_wifi_connection() {
                     log "Connected to WiFi (via nmcli): $ssid"
                     return 0
                 fi
-                return 0
+                # SSID empty despite "connected" state — fall through to next method
             fi
         fi
     fi
@@ -136,7 +140,7 @@ try_connect_saved_networks() {
 
         # If no specific connections worked, try auto-connect
         log "Trying NetworkManager auto-connect..."
-        nmcli device connect wlan0 2>/dev/null || true
+        nmcli device connect "$WIFI_IFACE" 2>/dev/null || true
         sleep 5
 
         if has_wifi_connection; then
@@ -191,7 +195,7 @@ start_wifi_connect() {
     else
         log "ERROR: Failed to start WiFi Connect"
         # If WiFi Connect fails, ensure NetworkManager can take back control
-        nmcli device set wlan0 managed yes 2>/dev/null || true
+        nmcli device set "$WIFI_IFACE" managed yes 2>/dev/null || true
     fi
 }
 
@@ -204,11 +208,11 @@ stop_wifi_connect() {
 
         # Give NetworkManager full control back
         sleep 1
-        nmcli device set wlan0 managed yes 2>/dev/null || true
+        nmcli device set "$WIFI_IFACE" managed yes 2>/dev/null || true
 
         # Trigger a reconnection attempt with saved networks
         sleep 1
-        nmcli device connect wlan0 2>/dev/null || true
+        nmcli device connect "$WIFI_IFACE" 2>/dev/null || true
 
         # Note: ossuary-web runs on port 8081 and stays running always
     fi
@@ -263,19 +267,8 @@ wait_for_network_on_boot() {
             return 0
         fi
 
-        # Short wait in case of temporary network
-        local quick_wait=30
-        while [ $waited -lt $quick_wait ]; do
-            if has_wifi_connection; then
-                log "WiFi connection found after ${waited}s"
-                return 0
-            fi
-
-            sleep 5
-            waited=$((waited + 5))
-        done
-
-        log "No saved networks and no connection after ${quick_wait}s"
+        # No saved networks — go straight to AP mode, don't make users wait
+        log "No saved networks and no connection, proceeding to AP mode immediately"
     fi
 
     return 1

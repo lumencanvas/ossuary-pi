@@ -302,7 +302,8 @@ ExecStart=/usr/local/bin/wifi-connect \\
     --ui-directory $CUSTOM_UI_DIR \\
     --activity-timeout 600 \\
     --portal-listening-port 8080
-Restart=no
+Restart=on-failure
+RestartSec=10
 Environment="DBUS_SYSTEM_BUS_ADDRESS=unix:path=/run/dbus/system_bus_socket"
 
 [Install]
@@ -337,8 +338,8 @@ EOF
 Description=Ossuary Process Manager - Keeps User Command Running
 After=multi-user.target NetworkManager.service ossuary-web.service
 Wants=network-online.target ossuary-web.service
-StartLimitIntervalSec=60
-StartLimitBurst=3
+StartLimitIntervalSec=300
+StartLimitBurst=10
 
 [Service]
 Type=simple
@@ -358,7 +359,7 @@ StandardOutput=journal
 StandardError=journal
 
 [Install]
-WantedBy=graphical.target
+WantedBy=multi-user.target
 EOF
 
     # WiFi Connect Manager - Intelligently manages captive portal
@@ -390,7 +391,7 @@ EOF
 Description=Ossuary Web Configuration Interface
 After=network-online.target wifi-connect-manager.service
 Wants=network-online.target
-BindsTo=wifi-connect-manager.service
+Wants=wifi-connect-manager.service
 
 [Service]
 Type=simple
@@ -529,6 +530,21 @@ perform_installation() {
 }
 EOF
     fi
+    # Restrict config permissions (may contain WiFi passwords)
+    chmod 600 "$CONFIG_DIR/config.json" 2>/dev/null || true
+
+    # Step 5b: Configure log rotation
+    log "Configuring log rotation..."
+    cat > /etc/logrotate.d/ossuary << 'LOGROTATE_EOF'
+/var/log/ossuary-*.log {
+    weekly
+    rotate 4
+    compress
+    missingok
+    notifempty
+}
+LOGROTATE_EOF
+    success "Log rotation configured"
 
     # Step 6: Enable and restart services
     log "Enabling and restarting services..."

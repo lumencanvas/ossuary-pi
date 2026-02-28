@@ -750,6 +750,7 @@
         let scheduleRules = [];
         let savedNetworks = [];
         let currentConfig = null;
+        let pollInterval = null;
 
         // Initialize
         async function init() {
@@ -759,7 +760,8 @@
             loadTimezone();
             fetchSystemInfo();
             loadCurrentConfig();
-            setInterval(loadNearbyNetworks, 15000);
+            if (pollInterval) clearInterval(pollInterval);
+            pollInterval = setInterval(loadNearbyNetworks, 15000);
         }
 
         // Load current config and detect active preset
@@ -1326,6 +1328,9 @@
                 });
                 hideModal('add-schedule-modal');
                 document.getElementById('schedule-name').value = '';
+                document.getElementById('schedule-start-time').value = '08:00';
+                document.getElementById('schedule-end-time').value = '';
+                document.getElementById('schedule-action').selectedIndex = 0;
                 document.querySelectorAll('#schedule-days .day-btn').forEach(btn => btn.classList.remove('selected'));
                 renderScheduleRules();
             } catch (e) {

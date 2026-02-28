@@ -47,8 +47,8 @@ try:
 except:
     pass
 " "$config_path" 2>/dev/null)
-        # Return trimmed command (handles whitespace-only values)
-        echo "$cmd" | xargs 2>/dev/null || echo ""
+        # Python .strip() already handles whitespace
+        echo "$cmd"
     fi
 }
 
@@ -514,8 +514,8 @@ WRAPPER_EOF
 
         rm -f "${PID_FILE}.child"
 
-        # Log the exit
-        local current_time=$(date +%s)
+        # Log the exit (use $SECONDS for monotonic timing, immune to NTP drift)
+        local current_time=$SECONDS
         if [ $EXIT_CODE -eq 0 ]; then
             log "Process exited normally (code 0)"
             # Reset crash tracking on clean exit

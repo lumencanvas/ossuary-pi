@@ -22,74 +22,102 @@ chmod 755 "$(dirname "$SCHEDULE_STATE_FILE")" 2>/dev/null || true
 LAST_STATE="unknown"
 DISCONNECTED_SINCE=0
 
+# Cached config values (reloaded on SIGHUP)
+CACHED_BEHAVIOR_LOST=""
+CACHED_BEHAVIOR_REGAINED=""
+CACHED_REFRESH_INTERVAL=0
+CONFIG_LOADED=false
+
+reload_config() {
+    if [ -f "$CONFIG_FILE" ]; then
+        local result
+        result=$(python3 -c "
+import json
+try:
+    with open('$CONFIG_FILE', 'r') as f:
+        config = json.load(f)
+    behaviors = config.get('behaviors', {})
+    lost = behaviors.get('on_connection_lost', {})
+    regained = behaviors.get('on_connection_regained', {})
+    refresh = behaviors.get('scheduled_refresh', {})
+    print(lost.get('action', '') if isinstance(lost, dict) else '')
+    print(regained.get('action', '') if isinstance(regained, dict) else '')
+    if isinstance(refresh, dict) and refresh.get('enabled', False):
+        print(refresh.get('interval_minutes', 60))
+    else:
+        print(0)
+except:
+    print('')
+    print('')
+    print(0)
+" 2>/dev/null)
+        CACHED_BEHAVIOR_LOST=$(echo "$result" | sed -n '1p')
+        CACHED_BEHAVIOR_REGAINED=$(echo "$result" | sed -n '2p')
+        CACHED_REFRESH_INTERVAL=$(echo "$result" | sed -n '3p')
+        CONFIG_LOADED=true
+        log "Config loaded: lost=$CACHED_BEHAVIOR_LOST regained=$CACHED_BEHAVIOR_REGAINED refresh=${CACHED_REFRESH_INTERVAL}m"
+    fi
+}
+
 log() {
     echo "[$(date '+%Y-%m-%d %H:%M:%S')] $1" | tee -a "$LOG_FILE"
 }
 
-# Check if connected to internet
+# Check if connected to the network
+# Checks LAN/gateway first (fast, works on intranets), then optionally verifies
+# external internet. A kiosk on an intranet with no outside internet is still "connected."
 check_connection() {
-    # Try multiple endpoints for reliability
+    # Step 1: Check if we have a network gateway (fastest, works on any LAN/intranet)
+    local gateway
+    gateway=$(ip route 2>/dev/null | grep default | awk '{print $3}' | head -1)
+    if [ -z "$gateway" ]; then
+        # No default route at all — definitely not connected
+        echo "disconnected"
+        return
+    fi
+
+    # Step 2: Ping the gateway — confirms the local network link is up
+    if ping -c 1 -W 1 "$gateway" &>/dev/null; then
+        echo "connected"
+        return
+    fi
+
+    # Step 3: Gateway didn't respond to ping (some routers block ICMP).
+    # Try an ARP lookup — if gateway is in the ARP table, layer 2 is working.
+    if ip neigh show "$gateway" 2>/dev/null | grep -qv "FAILED"; then
+        echo "connected"
+        return
+    fi
+
+    # Step 4: Last resort — try external endpoints in case gateway blocks ping/ARP
+    # but forwards traffic (unusual but possible with strict firewall rules)
+    if curl -s --max-time 2 -o /dev/null -w "%{http_code}" http://detectportal.firefox.com/canonical.html 2>/dev/null | grep -q "200"; then
+        echo "connected"
+        return
+    fi
     if ping -c 1 -W 2 8.8.8.8 &>/dev/null; then
         echo "connected"
         return
     fi
-    if ping -c 1 -W 2 1.1.1.1 &>/dev/null; then
-        echo "connected"
-        return
-    fi
-    # Check if we at least have a gateway
-    local gateway
-    gateway=$(ip route 2>/dev/null | grep default | awk '{print $3}' | head -1)
-    if [ -n "$gateway" ] && ping -c 1 -W 2 "$gateway" &>/dev/null; then
-        echo "connected"
-        return
-    fi
+
     echo "disconnected"
 }
 
-# Get behavior settings from config
+# Get behavior settings from cached config
 get_behavior() {
     local key="$1"
-    if [ -f "$CONFIG_FILE" ]; then
-        python3 -c "
-import json
-try:
-    with open('$CONFIG_FILE', 'r') as f:
-        config = json.load(f)
-        behaviors = config.get('behaviors', {})
-        value = behaviors.get('$key', {})
-        if isinstance(value, dict):
-            action = value.get('action', '')
-            print(action)
-        elif isinstance(value, bool):
-            print('enabled' if value else 'disabled')
-        else:
-            print(value)
-except:
-    pass
-" 2>/dev/null
-    fi
+    [ "$CONFIG_LOADED" != "true" ] && reload_config
+    case "$key" in
+        "on_connection_lost") echo "$CACHED_BEHAVIOR_LOST" ;;
+        "on_connection_regained") echo "$CACHED_BEHAVIOR_REGAINED" ;;
+        *) echo "" ;;
+    esac
 }
 
-# Check if refresh interval is enabled and get minutes
+# Get refresh interval from cached config
 get_refresh_interval() {
-    if [ -f "$CONFIG_FILE" ]; then
-        python3 -c "
-import json
-try:
-    with open('$CONFIG_FILE', 'r') as f:
-        config = json.load(f)
-        refresh = config.get('behaviors', {}).get('scheduled_refresh', {})
-        if refresh.get('enabled', False):
-            print(refresh.get('interval_minutes', 60))
-        else:
-            print(0)
-except:
-    print(0)
-" 2>/dev/null
-    else
-        echo 0
-    fi
+    [ "$CONFIG_LOADED" != "true" ] && reload_config
+    echo "${CACHED_REFRESH_INTERVAL:-0}"
 }
 
 # Check and execute schedule rules
@@ -253,15 +281,15 @@ except:
                     "http://localhost:$CHROMIUM_DEBUG_PORT/json/activate/$page_id" 2>/dev/null)
 
                 # Use Python to send the actual reload command via websocket
-                python3 -c "
+                # Pass pages via stdin to avoid triple-quote breakage from page titles/URLs
+                echo "$pages" | python3 -c "
 import json
 import socket
-import ssl
+import sys
 
 # Simple websocket to send CDP command
 def send_cdp_command(ws_url, method, params=None):
     try:
-        import urllib.request
         # Parse ws:// URL
         if ws_url.startswith('ws://'):
             host_port = ws_url[5:].split('/')[0]
@@ -292,8 +320,8 @@ def send_cdp_command(ws_url, method, params=None):
         pass
     return False
 
-# Get page ws URL
-pages = json.loads('''$pages''')
+# Read pages from stdin
+pages = json.load(sys.stdin)
 for page in pages:
     if page.get('type') == 'page':
         ws_url = page.get('webSocketDebuggerUrl', '')
@@ -383,6 +411,9 @@ main() {
     log "Connection Monitor started"
     log "==================================="
 
+    # Load config at startup (reloaded on SIGHUP)
+    reload_config
+
     local current_state
     local check_interval=5
     local last_refresh_time=$(date +%s)
@@ -422,9 +453,16 @@ main() {
                 fi
             fi
 
-            # Check time-based schedule rules (only when connected)
-            local schedule_action
-            schedule_action=$(check_schedule_rules)
+            # Check time-based schedule rules (only when connected and clock is synced)
+            local schedule_action=""
+            local ntp_synced
+            ntp_synced=$(timedatectl show -p NTPSynchronized --value 2>/dev/null)
+            if [ "$ntp_synced" != "yes" ]; then
+                # Clock not synced — skip schedule rules to avoid wrong-time execution
+                schedule_action=""
+            else
+                schedule_action=$(check_schedule_rules)
+            fi
             if [ -n "$schedule_action" ]; then
                 execute_schedule_action "$schedule_action"
             fi
@@ -436,6 +474,7 @@ main() {
 
 # Signal handlers
 trap 'log "Received TERM signal, stopping..."; exit 0' TERM INT
+trap 'log "Received HUP signal, reloading config..."; reload_config' HUP
 
 # Run main
 main

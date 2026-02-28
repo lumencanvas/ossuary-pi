@@ -240,8 +240,12 @@ class ConfigHandler(SimpleHTTPRequestHandler):
         parsed_path = urlparse(self.path)
         path_parts = parsed_path.path.strip('/').split('/')
 
-        # Read POST data
+        # Read POST data (capped to prevent OOM on Pi)
         content_length = int(self.headers.get('Content-Length', 0))
+        MAX_BODY_SIZE = 1048576  # 1MB
+        if content_length > MAX_BODY_SIZE:
+            self.send_json_response({'error': 'Request too large'}, 413)
+            return
         post_data = self.rfile.read(content_length) if content_length > 0 else b'{}'
 
         # API endpoints
@@ -275,6 +279,8 @@ class ConfigHandler(SimpleHTTPRequestHandler):
             self.handle_delete_network(post_data)
         elif parsed_path.path == '/api/saved-networks/connect':
             self.handle_connect_saved_network(post_data)
+        elif parsed_path.path == '/api/profiles/activate':
+            self.handle_set_active_profile(post_data)
         elif parsed_path.path == '/api/display/power':
             self.handle_set_display_power(post_data)
         # WiFi Connect compatible endpoint (always available)
@@ -342,20 +348,9 @@ class ConfigHandler(SimpleHTTPRequestHandler):
             data = json.loads(post_data)
             command = data.get('command', '')
 
-            # Load existing config or create new
-            if os.path.exists(CONFIG_FILE):
-                with open(CONFIG_FILE, 'r') as f:
-                    config = json.load(f)
-            else:
-                config = {}
-
-            # Update command
+            config = self._load_config()
             config['startup_command'] = command
-
-            # Save config
-            os.makedirs(os.path.dirname(CONFIG_FILE), exist_ok=True)
-            with open(CONFIG_FILE, 'w') as f:
-                json.dump(config, f, indent=2)
+            self._save_config(config)
 
             # Send HUP signal to process manager to reload config
             try:
@@ -668,13 +663,30 @@ class ConfigHandler(SimpleHTTPRequestHandler):
         except Exception as e:
             self.send_json_response({'error': str(e)}, 500)
 
+    def _signal_connection_monitor(self):
+        """Send SIGHUP to connection monitor to reload cached config"""
+        try:
+            result = subprocess.run(
+                ['pgrep', '-f', 'connection-monitor.sh'],
+                capture_output=True, text=True, timeout=3
+            )
+            if result.returncode == 0:
+                for pid_str in result.stdout.strip().split('\n'):
+                    if pid_str.strip():
+                        os.kill(int(pid_str.strip()), signal.SIGHUP)
+        except (ValueError, OSError, subprocess.TimeoutExpired):
+            pass
+
     def handle_save_behaviors(self, post_data):
-        """Save behavior settings"""
+        """Save behavior settings (merges with existing, preserving unset keys)"""
         try:
             data = json.loads(post_data)
             config = self._load_config()
-            config['behaviors'] = data
+            if 'behaviors' not in config:
+                config['behaviors'] = {}
+            config['behaviors'].update(data)
             self._save_config(config)
+            self._signal_connection_monitor()
             self.send_json_response({'success': True})
         except Exception as e:
             self.send_json_response({'error': str(e)}, 500)
@@ -689,6 +701,37 @@ class ConfigHandler(SimpleHTTPRequestHandler):
                 'profiles': profiles,
                 'active': active
             })
+        except Exception as e:
+            self.send_json_response({'error': str(e)}, 500)
+
+    def handle_set_active_profile(self, post_data):
+        """Switch the active profile and trigger process manager reload"""
+        try:
+            data = json.loads(post_data)
+            profile_name = data.get('profile', '').strip()
+            if not profile_name:
+                self.send_json_response({'error': 'Profile name required'}, 400)
+                return
+            config = self._load_config()
+            if profile_name not in config.get('profiles', {}):
+                self.send_json_response({'error': f'Unknown profile: {profile_name}'}, 404)
+                return
+            config['active_profile'] = profile_name
+            self._save_config(config)
+            # Signal process manager to reload with new profile
+            pid_file = '/run/ossuary/process.pid'
+            reloaded = False
+            if os.path.exists(pid_file):
+                try:
+                    with open(pid_file, 'r') as f:
+                        pid = int(f.read().strip())
+                    os.kill(pid, signal.SIGHUP)
+                    reloaded = True
+                except (ValueError, OSError):
+                    pass
+            self.send_json_response({'success': True, 'active_profile': profile_name, 'process_reloaded': reloaded})
+        except json.JSONDecodeError:
+            self.send_json_response({'error': 'Invalid JSON'}, 400)
         except Exception as e:
             self.send_json_response({'error': str(e)}, 500)
 
@@ -975,24 +1018,39 @@ class ConfigHandler(SimpleHTTPRequestHandler):
         except Exception as e:
             self.send_json_response({'error': str(e)}, 500)
 
+    @staticmethod
+    def _deep_merge(base, override):
+        """Deep merge override into base, preserving nested default keys"""
+        result = dict(base)
+        for key, value in override.items():
+            if key in result and isinstance(result[key], dict) and isinstance(value, dict):
+                result[key] = ConfigHandler._deep_merge(result[key], value)
+            else:
+                result[key] = value
+        return result
+
     def _load_config(self):
-        """Load config with defaults"""
-        config = dict(DEFAULT_CONFIG)  # Start with defaults
+        """Load config with defaults (deep merge preserves nested keys)"""
+        config = dict(DEFAULT_CONFIG)
         if os.path.exists(CONFIG_FILE):
             try:
                 with open(CONFIG_FILE, 'r') as f:
                     saved_config = json.load(f)
-                    # Merge saved config over defaults
-                    config.update(saved_config)
+                    config = self._deep_merge(DEFAULT_CONFIG, saved_config)
             except:
                 pass
         return config
 
     def _save_config(self, config):
-        """Save config to file"""
+        """Save config to file (atomic write to survive power loss)"""
         os.makedirs(os.path.dirname(CONFIG_FILE), exist_ok=True)
-        with open(CONFIG_FILE, 'w') as f:
+        tmp_file = CONFIG_FILE + '.tmp'
+        with open(tmp_file, 'w') as f:
             json.dump(config, f, indent=2)
+            f.flush()
+            os.fsync(f.fileno())
+        os.chmod(tmp_file, 0o600)
+        os.rename(tmp_file, CONFIG_FILE)
 
     # Schedule handlers
     def handle_get_schedule(self):
@@ -1012,9 +1070,10 @@ class ConfigHandler(SimpleHTTPRequestHandler):
             config['schedule'] = data
             self._save_config(config)
             # Notify scheduler service to restart (picks up new config)
-            subprocess.run(['systemctl', 'restart', 'ossuary-connection-monitor'],
+            result = subprocess.run(['systemctl', 'restart', 'ossuary-connection-monitor'],
                          capture_output=True, timeout=10)
-            self.send_json_response({'success': True})
+            reloaded = result.returncode == 0
+            self.send_json_response({'success': True, 'monitor_reloaded': reloaded})
         except Exception as e:
             self.send_json_response({'error': str(e)}, 500)
 
@@ -1191,7 +1250,7 @@ class ConfigHandler(SimpleHTTPRequestHandler):
             self._save_config(config)
 
             # Optionally remove from NetworkManager too
-            if data.get('remove_from_system', False):
+            if data.get('remove_from_system', True):
                 try:
                     subprocess.run(
                         ['nmcli', 'connection', 'delete', ssid],
@@ -1245,9 +1304,9 @@ class ConfigHandler(SimpleHTTPRequestHandler):
                          capture_output=True, timeout=10)
             time.sleep(2)  # Give it time to scan
 
-            # Get list of networks
+            # Only request SSID,SIGNAL,SECURITY (skip BSSID — its colons break terse parsing)
             result = subprocess.run(
-                ['nmcli', '-t', '-f', 'SSID,SIGNAL,SECURITY,BSSID', 'device', 'wifi', 'list'],
+                ['nmcli', '-t', '-f', 'SSID,SIGNAL,SECURITY', 'device', 'wifi', 'list'],
                 capture_output=True, text=True, timeout=10
             )
 
@@ -1256,18 +1315,27 @@ class ConfigHandler(SimpleHTTPRequestHandler):
 
             if result.returncode == 0:
                 for line in result.stdout.strip().split('\n'):
-                    if line:
-                        parts = line.split(':')
-                        if len(parts) >= 3:
-                            ssid = parts[0].strip()
-                            if ssid and ssid not in seen_ssids:
-                                seen_ssids.add(ssid)
-                                networks.append({
-                                    'ssid': ssid,
-                                    'signal': int(parts[1]) if parts[1].isdigit() else 0,
-                                    'security': parts[2] if len(parts) > 2 else '',
-                                    'encrypted': parts[2] != '' and parts[2] != '--'
-                                })
+                    if line and ':' in line:
+                        # Parse from right: SSID can contain colons, but
+                        # SIGNAL is always a number and SECURITY is a known string
+                        last_colon = line.rfind(':')
+                        second_last = line.rfind(':', 0, last_colon)
+                        if second_last > 0:
+                            ssid = line[:second_last].strip()
+                            signal_str = line[second_last+1:last_colon]
+                            security = line[last_colon+1:]
+                        else:
+                            ssid = line[:last_colon].strip()
+                            signal_str = line[last_colon+1:]
+                            security = ''
+                        if ssid and ssid not in seen_ssids:
+                            seen_ssids.add(ssid)
+                            networks.append({
+                                'ssid': ssid,
+                                'signal': int(signal_str) if signal_str.strip().isdigit() else 0,
+                                'security': security.strip(),
+                                'encrypted': security.strip() != '' and security.strip() != '--'
+                            })
 
             # Sort by signal strength
             networks.sort(key=lambda x: x['signal'], reverse=True)
@@ -1293,18 +1361,28 @@ class ConfigHandler(SimpleHTTPRequestHandler):
 
             if result.returncode == 0:
                 for line in result.stdout.strip().split('\n'):
-                    if line:
-                        parts = line.split(':')
-                        if len(parts) >= 2:
-                            ssid = parts[0].strip()
-                            if ssid and ssid not in seen_ssids:
-                                seen_ssids.add(ssid)
-                                networks.append({
-                                    'ssid': ssid,
-                                    'signal': int(parts[1]) if len(parts) > 1 and parts[1].isdigit() else 0,
-                                    'security': parts[2] if len(parts) > 2 else '',
-                                    'encrypted': len(parts) > 2 and parts[2] != '' and parts[2] != '--'
-                                })
+                    if line and ':' in line:
+                        # Parse from right: SSID can contain colons, but
+                        # SIGNAL is always a number and SECURITY is a known string
+                        last_colon = line.rfind(':')
+                        second_last = line.rfind(':', 0, last_colon)
+                        if second_last > 0:
+                            ssid = line[:second_last].strip()
+                            signal_str = line[second_last+1:last_colon]
+                            security = line[last_colon+1:]
+                        else:
+                            # Fallback: only one colon
+                            ssid = line[:last_colon].strip()
+                            signal_str = line[last_colon+1:]
+                            security = ''
+                        if ssid and ssid not in seen_ssids:
+                            seen_ssids.add(ssid)
+                            networks.append({
+                                'ssid': ssid,
+                                'signal': int(signal_str) if signal_str.strip().isdigit() else 0,
+                                'security': security.strip(),
+                                'encrypted': security.strip() != '' and security.strip() != '--'
+                            })
 
             networks.sort(key=lambda x: x['signal'], reverse=True)
             # Return as array directly (WiFi Connect format)
