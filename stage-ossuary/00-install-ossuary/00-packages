@@ -1,11 +1,11 @@
 git
 curl
 wget
+jq
 network-manager
 python3
 python3-pip
 chromium
-xdotool
 dnsmasq
 hostapd
 wireless-tools

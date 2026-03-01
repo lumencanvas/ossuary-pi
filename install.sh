@@ -24,6 +24,10 @@ CONFIG_DIR="/etc/ossuary"
 CUSTOM_UI_DIR="$INSTALL_DIR/custom-ui"
 LOG_FILE="/tmp/ossuary-install.log"
 
+# Image build mode (set by pi-gen stage script)
+# Skips interactive prompts, apt-get, and service restarts
+OSSUARY_IMAGE_BUILD="${OSSUARY_IMAGE_BUILD:-}"
+
 # Colors
 RED='\033[0;31m'
 GREEN='\033[0;32m'
@@ -220,6 +224,18 @@ update_components() {
     mkdir -p "$CUSTOM_UI_DIR"
     mkdir -p "$CONFIG_DIR"
     mkdir -p "$INSTALL_DIR/scripts"
+
+    # In image build mode, REPO_DIR == INSTALL_DIR (files already in place).
+    # Just ensure executability and create the process-manager symlink.
+    if [ "$(realpath "$REPO_DIR" 2>/dev/null)" = "$(realpath "$INSTALL_DIR" 2>/dev/null)" ]; then
+        log "Source and install directories are the same, skipping file copies"
+        chmod +x "$INSTALL_DIR/scripts/"*.sh 2>/dev/null || true
+        chmod +x "$INSTALL_DIR/scripts/"*.py 2>/dev/null || true
+        # process-manager.sh must be accessible at install root (service file references it)
+        ln -sf "$INSTALL_DIR/scripts/process-manager.sh" "$INSTALL_DIR/process-manager.sh" 2>/dev/null || true
+        success "Components verified"
+        return 0
+    fi
 
     # Copy custom UI
     if [ -d "$REPO_DIR/custom-ui" ]; then
@@ -430,7 +446,7 @@ SyslogIdentifier=ossuary-connection
 WantedBy=multi-user.target
 EOF
 
-    systemctl daemon-reload
+    systemctl daemon-reload 2>/dev/null || true
     success "Services updated"
 }
 
@@ -446,25 +462,29 @@ perform_installation() {
 
     # Step 1: Install dependencies (only for fresh install)
     if [ "$mode" -eq 0 ]; then
-        log "Installing dependencies..."
-        echo "  Updating package lists..."
-        apt-get update >> "$LOG_FILE" 2>&1
-        echo "  Installing required packages..."
-        # Note: network-manager is pre-installed in Pi OS Bookworm/Trixie
-        # But we include it to be safe for older versions
-        apt-get install -y curl wget jq network-manager python3 python3-pip >> "$LOG_FILE" 2>&1
+        # Skip package installation and service startup in image build mode
+        # (packages handled by pi-gen 00-packages, services can't start in chroot)
+        if [ "$OSSUARY_IMAGE_BUILD" != "1" ]; then
+            log "Installing dependencies..."
+            echo "  Updating package lists..."
+            apt-get update >> "$LOG_FILE" 2>&1
+            echo "  Installing required packages..."
+            # Note: network-manager is pre-installed in Pi OS Bookworm/Trixie
+            # But we include it to be safe for older versions
+            apt-get install -y curl wget jq network-manager python3 python3-pip >> "$LOG_FILE" 2>&1
 
-        # NetworkManager is default in Pi OS Bookworm (2023) and Trixie (2025)
-        # But we'll ensure it's enabled
-        if ! systemctl is-active --quiet NetworkManager; then
-            log "Enabling NetworkManager..."
-            systemctl enable NetworkManager >> "$LOG_FILE" 2>&1
-            systemctl start NetworkManager >> "$LOG_FILE" 2>&1
+            # NetworkManager is default in Pi OS Bookworm (2023) and Trixie (2025)
+            # But we'll ensure it's enabled
+            if ! systemctl is-active --quiet NetworkManager; then
+                log "Enabling NetworkManager..."
+                systemctl enable NetworkManager >> "$LOG_FILE" 2>&1
+                systemctl start NetworkManager >> "$LOG_FILE" 2>&1
 
-            # Wait for NetworkManager to fully start
-            sleep 2
-        else
-            success "NetworkManager is already running (default in Pi OS 2025)"
+                # Wait for NetworkManager to fully start
+                sleep 2
+            else
+                success "NetworkManager is already running (default in Pi OS 2025)"
+            fi
         fi
 
         # Note: We don't touch dhcpcd anymore - it's deprecated and causes issues
@@ -559,6 +579,16 @@ LOGROTATE_EOF
         systemctl enable ossuary-connection-monitor.service >> "$LOG_FILE" 2>&1
     fi
 
+    # Step 7: Copy uninstall and fix scripts
+    cp "$REPO_DIR/uninstall.sh" "$INSTALL_DIR/" 2>/dev/null || true
+    chmod +x "$INSTALL_DIR/uninstall.sh" 2>/dev/null || true
+
+    # Skip service restarts and verification in image build mode (no systemd in chroot)
+    if [ "$OSSUARY_IMAGE_BUILD" = "1" ]; then
+        log "Image build mode: skipping service restarts (services will start on first boot)"
+        return 0
+    fi
+
     # Restart services (don't fail if services don't start immediately)
     log "Starting all services..."
 
@@ -582,11 +612,6 @@ LOGROTATE_EOF
     # Start connection monitor (handles refresh on connection events)
     log "Starting connection monitor..."
     systemctl restart ossuary-connection-monitor 2>/dev/null || true
-
-    # Step 7: Copy uninstall and fix scripts
-    cp "$REPO_DIR/uninstall.sh" "$INSTALL_DIR/" 2>/dev/null || true
-    chmod +x "$INSTALL_DIR/uninstall.sh" 2>/dev/null || true
-
 
     # Step 8: Verify installation
     log "Verifying installation..."
@@ -664,6 +689,16 @@ run_ssh_safe() {
 
 # Main execution
 main() {
+    # Image build mode: non-interactive, skip prompts and service management
+    if [ "$OSSUARY_IMAGE_BUILD" = "1" ]; then
+        echo "=== Ossuary Pi Image Build Mode ==="
+        LOG_FILE="/tmp/ossuary-install.log"
+        echo "Image build started at $(date)" > "$LOG_FILE"
+        perform_installation 0
+        echo "=== Image build installation complete ==="
+        return 0
+    fi
+
     # Initialize log first thing
     echo "Installation/Update started at $(date)" > "$LOG_FILE"
     echo "Script version: $(date -r "$0" '+%Y-%m-%d %H:%M:%S' 2>/dev/null || echo 'unknown')" >> "$LOG_FILE"
