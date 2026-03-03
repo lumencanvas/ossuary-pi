@@ -26,8 +26,8 @@ jobs:
             pi_gen_version: arm64
             release: trixie
           - name: armhf
-            pi_gen_version: master
-            release: bookworm  # Trixie 32-bit broken upstream (SHA-1 key issue)
+            pi_gen_version: bookworm
+            release: bookworm
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
