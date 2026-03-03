@@ -23,7 +23,7 @@ jobs:
       matrix:
         include:
           - name: arm64
-            pi_gen_version: 2e8cf2536db7  # Pin: arm64 branch pre-qemu-user-binfmt change (2026-02-26)
+            pi_gen_version: 2025-12-04-raspios-trixie-arm64  # Pin: last tag before qemu-user-binfmt breaking change
             release: trixie
           - name: armhf
             pi_gen_version: bookworm
