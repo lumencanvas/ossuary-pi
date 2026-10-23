@@ -165,8 +165,9 @@ If you didn't set up WiFi in Pi Imager, or need to change networks:
 
 A Pi connected by **ethernet** never opens the setup hotspot.
 
-> SSH is **off** in the pre-built image (its default login, `pi` / `ossuary`, is public).
-> Enable it with your own username and password in Pi Imager's OS customisation.
+> SSH is **on** in the pre-built image so you can update it later. Its default login,
+> `pi` / `ossuary`, is public: run `passwd` after first boot, or set your own user and
+> password in Pi Imager's OS customisation.
 
 ---
 
