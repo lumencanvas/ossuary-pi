@@ -597,6 +597,21 @@
             </div>
 
             <div class="info-box" style="margin-top: var(--space-md);">
+                <h3>Memory Watchdog</h3>
+                <p style="margin-bottom: var(--space-sm);">Restarts the kiosk if the Pi nearly runs out of memory (RAM and swap together, for about a minute), instead of freezing or crashing. Now using <span id="memory-now">…</span>.</p>
+                <div style="display: flex; gap: var(--space-sm); align-items: center;">
+                    <div class="checkbox-item" style="flex: 1; margin: 0;"><input type="checkbox" id="memory-watchdog-enabled" onchange="saveMemoryWatchdog()"><label for="memory-watchdog-enabled">Restart above</label></div>
+                    <select id="memory-watchdog-percent" onchange="saveMemoryWatchdog()" style="width: auto;">
+                        <option value="80">80%</option>
+                        <option value="85">85%</option>
+                        <option value="90">90% (recommended)</option>
+                        <option value="95">95%</option>
+                    </select>
+                </div>
+                <p class="hint" id="memory-watchdog-hint">Higher leaves more room for heavy pages; 95% is close to where Linux starts killing programs itself.</p>
+            </div>
+
+            <div class="info-box" style="margin-top: var(--space-md);">
                 <h3>Setup Code</h3>
                 <p style="margin-bottom: var(--space-sm);">Anyone with this code can change this kiosk. Give it to whoever else needs in, or pick one your team will remember.</p>
                 <div style="display: flex; gap: var(--space-sm); align-items: center; margin-bottom: var(--space-sm);">
@@ -1027,7 +1042,7 @@
             if (tab === 'networks') { loadSavedNetworks(); loadWifiCountry(); }
             if (tab === 'schedule') { loadSchedule(); loadTimezone(); }
             if (tab === 'display') loadCurrentConfig();
-            if (tab === 'control') { loadProcessStatus(); loadHostname(); }
+            if (tab === 'control') { loadProcessStatus(); loadHostname(); loadMemoryWatchdog(); }
             if (tab === 'logs') loadLogs();
         }
 
@@ -1171,6 +1186,33 @@
                     ? 'Sets the radio\'s legal channels. Needed for 5 GHz networks.'
                     : 'Not set: only 2.4 GHz networks may work. Enter your two-letter country code.';
             } catch (e) {}
+        }
+
+        async function loadMemoryWatchdog() {
+            try {
+                const [behaviors, info] = await Promise.all([apiJson('/api/behaviors'), apiJson('/api/system/info')]);
+                const w = behaviors.memory_watchdog || { enabled: true, max_percent: 90 };
+                document.getElementById('memory-watchdog-enabled').checked = w.enabled !== false;
+                document.getElementById('memory-watchdog-percent').value = String(w.max_percent || 90);
+                document.getElementById('memory-now').textContent =
+                    info.memory_used_percent == null ? 'unknown' : `${info.memory_used_percent}%`;
+            } catch (e) {}
+        }
+
+        async function saveMemoryWatchdog() {
+            const hint = document.getElementById('memory-watchdog-hint');
+            const memory_watchdog = {
+                enabled: document.getElementById('memory-watchdog-enabled').checked,
+                max_percent: parseInt(document.getElementById('memory-watchdog-percent').value, 10),
+            };
+            try {
+                await apiJson('/api/behaviors', { method: 'POST', body: { memory_watchdog } });
+                hint.textContent = memory_watchdog.enabled
+                    ? `Saved. Restarts the kiosk above ${memory_watchdog.max_percent}%.`
+                    : 'Saved. The watchdog is off.';
+            } catch (e) {
+                hint.textContent = e.message;
+            }
         }
 
         let setupCodeShown = false;

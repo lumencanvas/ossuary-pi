@@ -52,6 +52,55 @@ except Exception:
 ' "$CONFIG_FILE" 2>/dev/null
 }
 
+# Memory watchdog settings as "enabled max_percent" (defaults: on, 90).
+get_memory_watchdog() {
+    python3 -c '
+import json, sys
+w = {}
+try:
+    w = (json.load(open(sys.argv[1])).get("behaviors") or {}).get("memory_watchdog") or {}
+except Exception:
+    pass
+pct = w.get("max_percent", 90)
+pct = pct if isinstance(pct, int) and 50 <= pct <= 98 else 90
+print("1" if w.get("enabled", True) is not False else "0", pct)
+' "$CONFIG_FILE" 2>/dev/null || echo "1 90"
+}
+
+# Percent of RAM + swap in use. Counting swap means a page that uses a lot of
+# memory is left alone while swap still has room.
+memory_used_percent() {
+    awk '/^MemTotal:/{t=$2} /^MemAvailable:/{a=$2} /^SwapTotal:/{st=$2} /^SwapFree:/{sf=$2}
+         END{ if (t+st > 0) printf "%d", 100 - (a+sf)*100/(t+st); else print 0 }' "${MEMINFO:-/proc/meminfo}"
+}
+
+# Restarts the kiosk command before the system runs out of memory (a leaking
+# browser otherwise ends in the kernel OOM killer or a frozen screen). Acts
+# only after two checks in a row over the limit (~1 min), then waits 5 min
+# before it can act again.
+MEMORY_CHECK_SECONDS=30
+memory_watchdog() {
+    trap - TERM INT HUP
+    local manager=$1 over=0 last_restart=-300 enabled pct used
+    while kill -0 "$manager" 2>/dev/null; do
+        sleep "$MEMORY_CHECK_SECONDS"
+        read -r enabled pct <<< "$(get_memory_watchdog)"
+        [ "$enabled" = 1 ] && [ -f "${PID_FILE}.child" ] || { over=0; continue; }
+        used=$(memory_used_percent)
+        if [ "$used" -ge "$pct" ]; then
+            over=$((over + 1))
+        else
+            over=0
+        fi
+        if [ "$over" -ge 2 ] && [ $((SECONDS - last_restart)) -ge 300 ]; then
+            log "Memory at ${used}% (limit ${pct}%); restarting the kiosk command to free it"
+            last_restart=$SECONDS
+            over=0
+            kill -HUP "$manager"
+        fi
+    done
+}
+
 is_chromium_command() {
     echo "$1" | grep -qE '(^|[[:space:]/])(chromium(-browser)?|google-chrome)([[:space:]]|$)'
 }
@@ -303,6 +352,7 @@ main() {
         exit 1
     fi
     log "Ossuary process manager started (PID $$, kiosk user $user)"
+    memory_watchdog $$ &
 
     while true; do
         local command

@@ -29,6 +29,7 @@
 - **LumenCanvas first-class support** — WebGPU enabled, kiosk optimized, refresh behaviors built-in
 - **Captive portal configuration** — Configure WiFi and startup commands from any device
 - **Always-accessible control panel** — Web UI at `http://hostname.local` (or `:8081`) when connected, protected by a per-device setup code
+- **Memory watchdog** — Restarts the kiosk if RAM + swap stays above 90% (adjustable, or off) instead of freezing
 - **Rename the device** — Change the hostname (and its `.local` address) from the Control tab, no reboot
 - **Connection-aware behaviors** — Auto-refresh on reconnection, scheduled refreshes, connection monitoring
 - **Process management** — Keeps your kiosk app running with automatic restart on crash

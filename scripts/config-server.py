@@ -110,6 +110,9 @@ DEFAULT_CONFIG = {
         "on_connection_lost": {"action": "show_overlay", "timeout_seconds": 60},
         "on_connection_regained": {"action": "refresh_page", "delay_seconds": 3},
         "scheduled_refresh": {"enabled": False, "interval_minutes": 60},
+        # process-manager.sh restarts the kiosk command when RAM + swap stays
+        # above max_percent for about a minute.
+        "memory_watchdog": {"enabled": True, "max_percent": 90},
     },
     "schedule": {
         "enabled": False,
@@ -310,6 +313,21 @@ FAILED = FailedAttempts()
 # --------------------------------------------------------------------------
 # Kiosk user session helpers (mirror scripts/ossuary-lib.sh)
 # --------------------------------------------------------------------------
+
+def memory_used_percent():
+    """RAM + swap in use, as process-manager.sh's watchdog measures it."""
+    info = {}
+    try:
+        with open('/proc/meminfo') as f:
+            for line in f:
+                k, v = line.split(':', 1)
+                info[k] = int(v.split()[0])
+    except (OSError, ValueError):
+        return None
+    total = info.get('MemTotal', 0) + info.get('SwapTotal', 0)
+    free = info.get('MemAvailable', 0) + info.get('SwapFree', 0)
+    return int(100 - free * 100 / total) if total else None
+
 
 def kiosk_user():
     try:
@@ -720,13 +738,19 @@ class ConfigHandler(SimpleHTTPRequestHandler):
         self.send_json_response(load_config().get('behaviors', {}))
 
     def handle_save_behaviors(self, data):
-        allowed = {'on_connection_lost', 'on_connection_regained', 'scheduled_refresh'}
+        allowed = {'on_connection_lost', 'on_connection_regained', 'scheduled_refresh', 'memory_watchdog'}
         for key, value in data.items():
             if key not in allowed or not isinstance(value, dict):
                 return self.send_json_response({'error': f'Unknown or invalid behavior: {key}'}, 400)
             for num in ('delay_seconds', 'interval_minutes', 'timeout_seconds'):
                 if num in value and not (isinstance(value[num], int) and 0 <= value[num] <= 10080):
                     return self.send_json_response({'error': f'{key}.{num} must be a whole number'}, 400)
+            if 'enabled' in value and not isinstance(value['enabled'], bool):
+                return self.send_json_response({'error': f'{key}.enabled must be true or false'}, 400)
+            if key == 'memory_watchdog' and 'max_percent' in value and not (
+                    isinstance(value['max_percent'], int) and not isinstance(value['max_percent'], bool)
+                    and 50 <= value['max_percent'] <= 98):
+                return self.send_json_response({'error': 'memory_watchdog.max_percent must be 50-98'}, 400)
         update_config(lambda c: c.setdefault('behaviors', {}).update(data))
         self._signal_connection_monitor()
         self.send_json_response({'success': True})
@@ -767,6 +791,7 @@ class ConfigHandler(SimpleHTTPRequestHandler):
             'hostname': hostname, 'hostname_local': f"{hostname}.local", 'ip': ip,
             'config_url': f"http://{hostname}.local:8081",
             'config_url_ip': f"http://{ip}:8081" if ip else None,
+            'memory_used_percent': memory_used_percent(),
         })
 
     def handle_get_setup_code(self):
