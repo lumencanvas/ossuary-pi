@@ -515,7 +515,7 @@
                 </div>
                 <div class="checkbox-group">
                     <div class="checkbox-item"><input type="checkbox" id="lc-webgpu"><label for="lc-webgpu">Enable WebGPU (experimental, may reduce performance on Pi 5)</label></div>
-                    <div class="checkbox-item"><input type="checkbox" id="lc-vulkan" checked><label for="lc-vulkan">Enable Vulkan renderer</label></div>
+                    <div class="checkbox-item"><input type="checkbox" id="lc-vulkan"><label for="lc-vulkan">Enable Vulkan renderer (not recommended on Pi 5: leaks GPU memory until the browser crashes)</label></div>
                     <div class="checkbox-item"><input type="checkbox" id="lc-gpu-raster" checked><label for="lc-gpu-raster">GPU rasterization</label></div>
                 </div>
 
@@ -1376,9 +1376,11 @@
             if (document.getElementById('lc-kiosk').checked) flags.push('--kiosk');
             if (document.getElementById('lc-autoplay').checked) flags.push('--autoplay-policy=no-user-gesture-required');
             const features = [];
-            if (document.getElementById('lc-vulkan').checked) features.push('Vulkan');
+            // WebGPU on Linux runs on Vulkan, so it brings Vulkan with it.
+            const webgpu = document.getElementById('lc-webgpu').checked;
+            if (document.getElementById('lc-vulkan').checked || webgpu) features.push('Vulkan');
             if (document.getElementById('lc-gpu-raster').checked) features.push('CanvasOopRasterization');
-            if (document.getElementById('lc-webgpu').checked) {
+            if (webgpu) {
                 features.push('WebGPU');
                 flags.push('--enable-unsafe-webgpu');
             }

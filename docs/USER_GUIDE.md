@@ -89,6 +89,8 @@ DISPLAY=:0 chromium --kiosk --noerrdialogs --disable-infobars --enable-features=
 DISPLAY=:0 firefox --kiosk https://your-app.com
 ```
 
+> On a Pi 5, leave out `--enable-features=Vulkan` unless the page needs WebGPU. With Vulkan on, Chromium's GPU process grows by 100-200 MB a minute until it runs the Pi out of memory; without it, it stays flat (measured on a Pi 5 8 GB, Chromium on trixie, 2026-10-23).
+
 ### Testing Commands
 
 Before saving a command:
