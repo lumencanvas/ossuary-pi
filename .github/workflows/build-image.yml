@@ -58,6 +58,20 @@ jobs:
           mkdir -p config
           gpg --no-default-keyring --keyring /usr/share/keyrings/debian-archive-keyring.gpg --export > config/debian-keys.gpg || true
 
+      # pi-gen-action's own increase-runner-disk-size option runs a single
+      # `apt purge` over a fixed package list; once the runner image stops
+      # shipping any one of them, apt exits 100 and the build dies before it
+      # starts (seen on ubuntu-24.04 image 20261012). Free the space here
+      # instead, tolerating whatever is already gone.
+      - name: Free disk space
+        run: |
+          df -h / | tail -1
+          sudo rm -rf /usr/share/dotnet /usr/local/lib/android /opt/ghc /opt/hostedtoolcache \
+            /usr/local/share/boost /usr/share/swift /usr/local/julia* /opt/google/chrome \
+            /opt/microsoft /usr/local/share/chromium /usr/local/share/powershell /usr/lib/mono || true
+          sudo docker system prune --all --force --volumes >/dev/null || true
+          df -h / | tail -1
+
       - name: Build image
         uses: usimd/pi-gen-action@v1
         id: build
@@ -98,7 +112,7 @@ jobs:
           export-last-stage-only: true
 
           # Increase disk space for build
-          increase-runner-disk-size: true
+          increase-runner-disk-size: false  # done by "Free disk space" above
 
           # Extra host dependencies
           extra-host-dependencies: gnupg debian-archive-keyring
