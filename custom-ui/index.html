@@ -597,6 +597,21 @@
             </div>
 
             <div class="info-box" style="margin-top: var(--space-md);">
+                <h3>Setup Code</h3>
+                <p style="margin-bottom: var(--space-sm);">Anyone with this code can change this kiosk. Give it to whoever else needs in, or pick one your team will remember.</p>
+                <div style="display: flex; gap: var(--space-sm); align-items: center; margin-bottom: var(--space-sm);">
+                    <code id="setup-code-value" style="flex: 1; font-family: 'Space Mono', monospace; letter-spacing: 2px;">••••-••••</code>
+                    <button class="btn-small" onclick="toggleSetupCode()" id="setup-code-toggle">Show</button>
+                </div>
+                <div style="display: flex; gap: var(--space-sm);">
+                    <input type="text" id="setup-code-input" maxlength="64" placeholder="New code, 8+ letters or numbers" autocapitalize="characters" spellcheck="false" autocomplete="off" style="text-transform: uppercase; flex: 1;">
+                    <button class="btn-small" style="padding: 0 var(--space-lg);" onclick="saveSetupCode(false)">Set</button>
+                    <button class="btn-small" onclick="saveSetupCode(true)">Random</button>
+                </div>
+                <p class="hint" id="setup-code-hint">Changing it signs out every other browser.</p>
+            </div>
+
+            <div class="info-box" style="margin-top: var(--space-md);">
                 <h3>Device Name</h3>
                 <p style="margin-bottom: var(--space-sm);">The hostname. The control panel moves to <code id="hostname-url">http://ossuary.local</code>.</p>
                 <div style="display: flex; gap: var(--space-sm);">
@@ -846,7 +861,7 @@
                 return;
             }
             if (!r.ok) {
-                document.getElementById('code-error').textContent = "That code didn't match. Check the kiosk's screen.";
+                document.getElementById('code-error').textContent = "That code didn't match. It's on the kiosk's screen until a display is set, and in ossuary-setup-code.txt on the SD card.";
                 document.getElementById('code-error').className = 'message error show';
                 return;
             }
@@ -880,7 +895,7 @@
                     return response;
                 }
                 if (response.status !== 401) return response;
-                const ok = await promptForCode(storedCode() ? "That code didn't match. Check the kiosk's screen." : '');
+                const ok = await promptForCode(storedCode() ? "That code didn't match. It's on the kiosk's screen until a display is set, and in ossuary-setup-code.txt on the SD card." : '');
                 if (!ok) return response;
             }
             return fetch(path, opts);
@@ -1156,6 +1171,44 @@
                     ? 'Sets the radio\'s legal channels. Needed for 5 GHz networks.'
                     : 'Not set: only 2.4 GHz networks may work. Enter your two-letter country code.';
             } catch (e) {}
+        }
+
+        let setupCodeShown = false;
+        async function toggleSetupCode() {
+            const el = document.getElementById('setup-code-value');
+            const btn = document.getElementById('setup-code-toggle');
+            if (setupCodeShown) {
+                el.textContent = '••••-••••';
+                btn.textContent = 'Show';
+                setupCodeShown = false;
+                return;
+            }
+            try {
+                const data = await apiJson('/api/setup-code');
+                el.textContent = data.code;
+                btn.textContent = 'Hide';
+                setupCodeShown = true;
+            } catch (e) {
+                document.getElementById('setup-code-hint').textContent = e.message;
+            }
+        }
+
+        async function saveSetupCode(random) {
+            const input = document.getElementById('setup-code-input');
+            const hint = document.getElementById('setup-code-hint');
+            const body = random ? { random: true } : { code: input.value.trim() };
+            if (!random && !body.code) return;
+            try {
+                const data = await apiJson('/api/setup-code', { method: 'POST', body });
+                storeCode(data.code);  // keep this browser signed in
+                input.value = '';
+                document.getElementById('setup-code-value').textContent = data.code;
+                document.getElementById('setup-code-toggle').textContent = 'Hide';
+                setupCodeShown = true;
+                hint.textContent = 'Code changed. Other browsers will ask for the new one.';
+            } catch (e) {
+                hint.textContent = e.message;
+            }
         }
 
         async function loadHostname() {

@@ -50,6 +50,8 @@ PENDING_WIFI_FILE = "/run/ossuary/pending-wifi"  # read by wifi-connect-manager.
 HOTSPOT_PREFIX = "192.168.42."                     # wifi-connect's default portal subnet
 CODE_HEADER = "X-Ossuary-Code"
 CODE_ALPHABET = "ABCDEFGHJKMNPQRSTUVWXYZ23456789"  # no 0/O, 1/I/L
+MIN_CODE_LEN = 8   # letters/digits; a chosen code must be at least this long
+MAX_CODE_LEN = 32
 
 CONFIG_LOCK = threading.RLock()
 # Cross-process lock: connection-monitor.sh also rewrites config.json.
@@ -234,18 +236,28 @@ def load_or_create_setup_code():
     try:
         with open(SETUP_CODE_FILE) as f:
             code = f.read().strip()
-        if len(normalize_code(code)) == 8:
+        if MIN_CODE_LEN <= len(normalize_code(code)) <= MAX_CODE_LEN:
             return code
     except OSError:
         pass
-    raw = ''.join(secrets.choice(CODE_ALPHABET) for _ in range(8))
-    code = f"{raw[:4]}-{raw[4:]}"
-    os.makedirs(os.path.dirname(SETUP_CODE_FILE), exist_ok=True)
-    fd = os.open(SETUP_CODE_FILE, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
-    with os.fdopen(fd, 'w') as f:
-        f.write(code + '\n')
+    code = random_setup_code()
+    write_setup_code(code)
     print(f"[INFO] Generated a new setup code in {SETUP_CODE_FILE}", flush=True)
     return code
+
+
+def random_setup_code():
+    raw = ''.join(secrets.choice(CODE_ALPHABET) for _ in range(8))
+    return f"{raw[:4]}-{raw[4:]}"
+
+
+def write_setup_code(code):
+    os.makedirs(os.path.dirname(SETUP_CODE_FILE), exist_ok=True)
+    tmp = SETUP_CODE_FILE + '.tmp'
+    fd = os.open(tmp, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
+    with os.fdopen(fd, 'w') as f:
+        f.write(code + '\n')
+    os.replace(tmp, SETUP_CODE_FILE)
 
 
 def publish_code_to_boot_partition(code):
@@ -478,6 +490,7 @@ class ConfigHandler(SimpleHTTPRequestHandler):
         '/api/auth/check': 'handle_auth_check',
         '/api/wifi-country': 'handle_get_wifi_country',
         '/api/hostname': 'handle_get_hostname',
+        '/api/setup-code': 'handle_get_setup_code',
         '/startup': 'handle_get_startup',
         '/networks': 'handle_get_nearby_networks_compat',
     }
@@ -502,6 +515,7 @@ class ConfigHandler(SimpleHTTPRequestHandler):
         '/api/display/power': 'handle_set_display_power',
         '/api/wifi-country': 'handle_set_wifi_country',
         '/api/hostname': 'handle_set_hostname',
+        '/api/setup-code': 'handle_set_setup_code',
         '/connect': 'handle_wifi_connect',
     }
 
@@ -754,6 +768,28 @@ class ConfigHandler(SimpleHTTPRequestHandler):
             'config_url': f"http://{hostname}.local:8081",
             'config_url_ip': f"http://{ip}:8081" if ip else None,
         })
+
+    def handle_get_setup_code(self):
+        self.send_json_response({'code': SETUP_CODE})
+
+    def handle_set_setup_code(self, data):
+        """Choose a code ({'code': ...}) or roll a new random one ({'random': true})."""
+        global SETUP_CODE
+        if data.get('random'):
+            code = random_setup_code()
+        else:
+            code = re.sub(r'\s+', ' ', str(data.get('code', ''))).strip().upper()
+            n = len(normalize_code(code))
+            if n < MIN_CODE_LEN or n > MAX_CODE_LEN or len(code) > 64:
+                return self.send_json_response(
+                    {'error': f'Use {MIN_CODE_LEN}-{MAX_CODE_LEN} letters or numbers (dashes and spaces are ignored)'}, 400)
+        try:
+            write_setup_code(code)
+        except OSError as e:
+            return self.send_json_response({'error': f'Could not save the code: {e}'}, 500)
+        SETUP_CODE = code
+        publish_code_to_boot_partition(code)
+        self.send_json_response({'success': True, 'code': code})
 
     def handle_get_hostname(self):
         self.send_json_response({'hostname': socket.gethostname()})

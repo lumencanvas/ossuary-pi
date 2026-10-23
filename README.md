@@ -146,6 +146,11 @@ The control panel asks for the **setup code** shown on the kiosk's screen. It is
 also in `ossuary-setup-code.txt` on the SD card's boot partition, and in
 `/etc/ossuary/setup-code` over SSH. Every device generates its own on first boot.
 
+Each browser remembers the code once entered. To share access, open the Control
+tab: **Show** reveals the code, **Set** replaces it with one your team will remember
+(8+ letters or numbers), and **Random** rolls a new one, which signs out every
+other browser.
+
 From the control panel you can:
 - Select a preset (LumenCanvas, Web Kiosk, Custom)
 - Configure the startup command
