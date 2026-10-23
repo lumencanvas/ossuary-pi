@@ -65,6 +65,20 @@ success() {
     echo -e "${GREEN}✓${NC} $1"
 }
 
+# True when run from an SSH session. `sudo` drops SSH_CLIENT/SSH_TTY by
+# default, so also look for sshd among the parent processes.
+over_ssh() {
+    [ -n "$SSH_CLIENT" ] || [ -n "$SSH_TTY" ] && return 0
+    local pid=$$ comm
+    while [ "$pid" -gt 1 ] 2>/dev/null; do
+        comm=$(ps -o comm= -p "$pid" 2>/dev/null) || return 1
+        case "$comm" in sshd*) return 0 ;; esac
+        pid=$(ps -o ppid= -p "$pid" 2>/dev/null | tr -d ' ')
+        [ -n "$pid" ] || return 1
+    done
+    return 1
+}
+
 # Check if already installed
 check_existing_installation() {
     local is_installed=false
@@ -832,7 +846,7 @@ main() {
     esac
 
     # Check for SSH session
-    if [ -n "$SSH_CLIENT" ] || [ -n "$SSH_TTY" ]; then
+    if over_ssh; then
         if [ $mode -eq 0 ]; then
             # Fresh install - full SSH warning
             echo ""
@@ -895,7 +909,7 @@ main() {
     echo ""
 
     # Run installation based on context
-    if [ -n "$SSH_CLIENT" ] || [ -n "$SSH_TTY" ]; then
+    if over_ssh; then
         if [ $mode -eq 0 ]; then
             # Fresh install over SSH - use background wrapper
             run_ssh_safe $mode
@@ -955,7 +969,7 @@ main() {
                 echo "  http://${DEVICE_IP}:8081"
                 echo ""
                 echo "If no WiFi available:"
-                echo "  1. Connect to WiFi network: ${BLUE}Ossuary-Setup${NC}"
+                echo -e "  1. Connect to WiFi network: ${BLUE}Ossuary-Setup${NC}"
                 echo "  2. Open browser to configure WiFi + startup command"
                 echo "  3. After connecting, access config at the URLs above"
                 echo ""
@@ -1038,7 +1052,7 @@ main() {
             fi
             echo ""
             echo "If no WiFi available:"
-            echo "  1. Connect to WiFi network: ${BLUE}Ossuary-Setup${NC}"
+            echo -e "  1. Connect to WiFi network: ${BLUE}Ossuary-Setup${NC}"
             echo "  2. Open browser to configure WiFi + startup"
             echo "  3. After connecting, access config at the URLs above"
             echo ""
