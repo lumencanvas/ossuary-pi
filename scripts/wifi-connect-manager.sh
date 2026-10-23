@@ -1,373 +1,190 @@
 #!/bin/bash
 
 # WiFi Connect Manager
-# Intelligently manages when to run WiFi Connect captive portal
-# Only starts AP mode when no WiFi connection is available
+# Decides when the "Ossuary-Setup" captive portal (balena wifi-connect) runs.
+#
+# Rules:
+#   * The device is ONLINE when NetworkManager has an activated connection on an
+#     ethernet device, or a wifi connection that is not an access point. The
+#     hotspot itself never counts: while it is up, wlan0 is "connected" too.
+#   * Ethernet counts. A wired kiosk must never advertise an open setup hotspot.
+#   * While the portal runs, the radio belongs to wifi-connect and is left alone.
+#     wifi-connect exits by itself when someone joins a network through it, or
+#     after --activity-timeout if nobody opened the portal. Only then do we look
+#     again, give saved networks another chance, and restart the portal if needed.
+#   * Log on state changes only: this runs forever on an SD card.
 
-CONFIG_FILE="/etc/ossuary/config.json"
-LOG_FILE="/var/log/wifi-connect-manager.log"
-CHECK_INTERVAL=30  # Check every 30 seconds
-
-# Detect WiFi interface (supports non-standard names like wlan1, wlp2s0, etc.)
-WIFI_IFACE=$(iw dev 2>/dev/null | awk '$1=="Interface"{print $2}' | head -1)
-WIFI_IFACE="${WIFI_IFACE:-wlan0}"  # fallback
-MAX_WAIT_FOR_NETWORK=180  # Wait up to 3 minutes for network on boot
-INITIAL_WAIT=15  # Wait 15 seconds before first check to let NetworkManager initialize
+CHECK_INTERVAL=10
+BOOT_GRACE=90       # at boot, how long saved networks get to auto-connect
+LOST_GRACE=120      # after losing a connection (router reboot), before opening the hotspot
+RETRY_WINDOW=45     # after the portal times out, how long saved networks get
 
 log() {
-    echo "[$(date '+%Y-%m-%d %H:%M:%S')] $1" | tee -a "$LOG_FILE"
+    # stdout goes to the journal (journalctl -u wifi-connect-manager)
+    echo "$1"
 }
 
-# Check if we have a working internet connection
-has_internet() {
-    # Try multiple methods to detect internet connectivity
+wifi_iface() {
+    nmcli -t -f DEVICE,TYPE device status 2>/dev/null | awk -F: '$2 == "wifi" {print $1; exit}'
+}
 
-    # Method 1: Check if we can reach a reliable DNS server
-    if ping -c 1 -W 2 8.8.8.8 >/dev/null 2>&1; then
-        return 0
-    fi
+# Mode of a connection profile ("infrastructure", "ap", ...), by UUID.
+conn_mode() {
+    nmcli -g 802-11-wireless.mode connection show "$1" 2>/dev/null
+}
 
-    # Method 2: Check if we can reach Cloudflare DNS
-    if ping -c 1 -W 2 1.1.1.1 >/dev/null 2>&1; then
-        return 0
-    fi
-
-    # Method 3: Try HTTP connectivity test
-    if curl -s --max-time 5 http://detectportal.firefox.com/canonical.html >/dev/null 2>&1; then
-        return 0
-    fi
-
+is_online() {
+    local dev type state uuid
+    # CON-UUID never contains ':' so the terse output splits safely.
+    while IFS=: read -r dev type state uuid; do
+        case "$state" in
+            connected|"connected (externally)") ;;
+            *) continue ;;
+        esac
+        case "$type" in
+            ethernet) return 0 ;;
+            wifi) [ "$(conn_mode "$uuid")" != "ap" ] && return 0 ;;
+        esac
+    done < <(nmcli -t -f DEVICE,TYPE,STATE,CON-UUID device status 2>/dev/null)
     return 1
 }
 
-# Check if we have WiFi connection (not necessarily internet)
-has_wifi_connection() {
-    # Method 1: Use iwgetid if available (most reliable for SSID)
-    if command -v iwgetid >/dev/null 2>&1; then
-        if iwgetid -r >/dev/null 2>&1; then
-            local ssid=$(iwgetid -r 2>/dev/null)
-            if [ -n "$ssid" ]; then
-                log "Connected to WiFi: $ssid"
-                return 0
-            fi
-        fi
-    fi
-
-    # Method 2: Use NetworkManager nmcli
-    if command -v nmcli >/dev/null 2>&1; then
-        if nmcli -t -f WIFI g status 2>/dev/null | grep -q "enabled"; then
-            if nmcli -t -f STATE,TYPE device status 2>/dev/null | grep "wifi" | grep -q "connected"; then
-                local ssid=$(nmcli -t -f ACTIVE,SSID device wifi list 2>/dev/null | grep "^yes:" | cut -d: -f2 | head -1)
-                if [ -n "$ssid" ]; then
-                    log "Connected to WiFi (via nmcli): $ssid"
-                    return 0
-                fi
-                # SSID empty despite "connected" state — fall through to next method
-            fi
-        fi
-    fi
-
-    # Method 3: Check /sys interface state directly
-    for iface in /sys/class/net/wlan*; do
-        if [ -e "$iface/operstate" ]; then
-            if grep -q "up" "$iface/operstate" 2>/dev/null; then
-                log "WiFi interface $(basename $iface) is up"
-                return 0
-            fi
-        fi
-    done
-
+# Saved client (non-hotspot) wifi profiles exist?
+has_saved_wifi() {
+    local type uuid
+    while IFS=: read -r type uuid; do
+        [ "$type" = "802-11-wireless" ] || continue
+        [ "$(conn_mode "$uuid")" != "ap" ] && return 0
+    done < <(nmcli -t -f TYPE,UUID connection show 2>/dev/null)
     return 1
 }
 
-# Check if there are saved WiFi networks
-has_saved_networks() {
-    if command -v nmcli >/dev/null; then
-        # List all saved WiFi connections
-        local saved_count=$(nmcli -t -f TYPE,NAME connection show 2>/dev/null | grep -c "^802-11-wireless:")
-        if [ "$saved_count" -gt 0 ]; then
-            log "Found $saved_count saved WiFi network(s)"
-            return 0
-        fi
+# Fresh Raspberry Pi OS images keep WiFi rfkill-blocked, and NetworkManager's
+# radio switched off, until a WiFi country is set (pi-gen does this when the
+# image is built without WPA_COUNTRY). The hotspot cannot start like that.
+ensure_radio() {
+    if command -v rfkill >/dev/null 2>&1; then
+        rfkill unblock wifi 2>/dev/null || true
     fi
-
-    # Also check wpa_supplicant if NetworkManager isn't available
-    if [ -f /etc/wpa_supplicant/wpa_supplicant.conf ]; then
-        if grep -q "^[[:space:]]*ssid=" /etc/wpa_supplicant/wpa_supplicant.conf 2>/dev/null; then
-            log "Found saved networks in wpa_supplicant.conf"
-            return 0
-        fi
-    fi
-
-    return 1
+    nmcli radio wifi on 2>/dev/null || true
 }
 
-# Try to connect to saved networks
-try_connect_saved_networks() {
-    if command -v nmcli >/dev/null; then
-        log "Attempting to connect to saved networks..."
-
-        # First ensure WiFi is enabled
-        nmcli radio wifi on 2>/dev/null || true
-        sleep 1
-
-        # Get list of available WiFi networks
-        nmcli device wifi rescan 2>/dev/null || true
-        sleep 3
-
-        # Get list of available SSIDs
-        local available_ssids=$(nmcli -t -f SSID device wifi list 2>/dev/null | sort -u)
-
-        # Try to connect to each saved network that's available
-        for conn in $(nmcli -t -f TYPE,NAME connection show 2>/dev/null | grep "^802-11-wireless:" | cut -d: -f2); do
-            # Get the SSID for this connection
-            local conn_ssid=$(nmcli -t -f 802-11-wireless.ssid connection show "$conn" 2>/dev/null | cut -d: -f2)
-
-            # Check if this network is available
-            if echo "$available_ssids" | grep -q "^$conn_ssid$"; then
-                log "Attempting to connect to saved network: $conn (SSID: $conn_ssid)"
-                if nmcli connection up "$conn" 2>/dev/null; then
-                    log "Successfully connected to $conn"
-                    sleep 3
-                    if has_wifi_connection; then
-                        return 0
-                    fi
-                else
-                    log "Failed to connect to $conn"
-                fi
-            fi
-        done
-
-        # If no specific connections worked, try auto-connect
-        log "Trying NetworkManager auto-connect..."
-        nmcli device connect "$WIFI_IFACE" 2>/dev/null || true
-        sleep 5
-
-        if has_wifi_connection; then
-            return 0
-        fi
-    fi
-
-    return 1
+portal_running() {
+    local s
+    s=$(systemctl is-active wifi-connect 2>/dev/null)
+    [ "$s" = "active" ] || [ "$s" = "activating" ]
 }
 
-# Ensure saved networks have autoconnect enabled
-ensure_autoconnect() {
-    if command -v nmcli >/dev/null; then
-        # Enable autoconnect for all WiFi connections
-        for conn in $(nmcli -t -f TYPE,NAME connection show 2>/dev/null | grep "^802-11-wireless:" | cut -d: -f2); do
-            log "Enabling autoconnect for network: $conn"
-            nmcli connection modify "$conn" connection.autoconnect yes 2>/dev/null || true
-            nmcli connection modify "$conn" connection.autoconnect-priority 10 2>/dev/null || true
-        done
-    fi
+start_portal() {
+    ensure_radio
+    log "Starting the Ossuary-Setup hotspot"
+    systemctl start wifi-connect || log "ERROR: wifi-connect failed to start (journalctl -u wifi-connect)"
 }
 
-# Check if WiFi Connect is running
-wifi_connect_running() {
-    systemctl is-active --quiet wifi-connect
-}
-
-# Start WiFi Connect (captive portal)
-start_wifi_connect() {
-    # Make absolutely sure NetworkManager isn't trying to manage the interface
-    log "Preparing to start captive portal..."
-
-    # Don't start if we're already connected
-    if has_wifi_connection; then
-        log "WiFi connection detected, not starting captive portal"
-        return 1
-    fi
-
-    log "No WiFi connection detected, starting captive portal..."
-
-    # Note: wifi-connect runs on port 8080, ossuary-web runs on port 8081
-    # They can coexist, no need to stop ossuary-web anymore
-
-    # Ensure WiFi Connect doesn't conflict with NetworkManager
-    # WiFi Connect will manage the interface when it starts
-    systemctl start wifi-connect
-
-    if systemctl is-active --quiet wifi-connect; then
-        log "WiFi Connect captive portal started successfully on port 8080"
-        log "Connect to 'Ossuary-Setup' network to configure WiFi"
-        log "Config interface also available on port 8081"
-    else
-        log "ERROR: Failed to start WiFi Connect"
-        # If WiFi Connect fails, ensure NetworkManager can take back control
-        nmcli device set "$WIFI_IFACE" managed yes 2>/dev/null || true
-    fi
-}
-
-# Stop WiFi Connect
-stop_wifi_connect() {
-    if wifi_connect_running; then
-        log "WiFi connection restored, stopping captive portal..."
+stop_portal() {
+    if portal_running; then
+        log "Stopping the Ossuary-Setup hotspot"
         systemctl stop wifi-connect
-        log "Captive portal stopped"
-
-        # Give NetworkManager full control back
-        sleep 1
-        nmcli device set "$WIFI_IFACE" managed yes 2>/dev/null || true
-
-        # Trigger a reconnection attempt with saved networks
-        sleep 1
-        nmcli device connect "$WIFI_IFACE" 2>/dev/null || true
-
-        # Note: ossuary-web runs on port 8081 and stays running always
     fi
 }
 
-# Wait for network on boot
-wait_for_network_on_boot() {
-    local waited=0
-
-    # Initial wait for NetworkManager to fully initialize
-    log "Waiting ${INITIAL_WAIT}s for NetworkManager to initialize..."
-    sleep $INITIAL_WAIT
-
-    # Check if there are saved networks
-    if has_saved_networks; then
-        log "Found saved networks, waiting for auto-connection..."
-
-        # Ensure all saved networks have autoconnect enabled
-        ensure_autoconnect
-
-        # Try to explicitly connect to saved networks
-        try_connect_saved_networks
-
-        # Extended wait time for saved networks
-        while [ $waited -lt $MAX_WAIT_FOR_NETWORK ]; do
-            if has_wifi_connection; then
-                log "WiFi connection established after ${waited}s"
-                return 0
-            fi
-
-            # Periodically try to reconnect
-            if [ $((waited % 60)) -eq 0 ] && [ $waited -gt 0 ]; then
-                log "Retrying connection to saved networks..."
-                try_connect_saved_networks
-            fi
-
-            sleep 5
-            waited=$((waited + 5))
-
-            if [ $((waited % 30)) -eq 0 ]; then
-                log "Still waiting for saved network connection... (${waited}s/${MAX_WAIT_FOR_NETWORK}s)"
-            fi
-        done
-
-        log "Could not connect to saved networks after ${MAX_WAIT_FOR_NETWORK}s"
-    else
-        log "No saved networks found, checking for existing connection..."
-
-        # Quick check for any existing connection
-        if has_wifi_connection; then
-            log "WiFi connection already established"
-            return 0
-        fi
-
-        # No saved networks — go straight to AP mode, don't make users wait
-        log "No saved networks and no connection, proceeding to AP mode immediately"
-    fi
-
-    return 1
-}
-
-# Main monitoring loop
-monitor_network() {
-    log "Starting WiFi connection monitoring..."
-    local last_network_check=0
-    local network_check_interval=300  # Check saved networks every 5 minutes
-
-    while true; do
-        local current_time=$(date +%s)
-
-        if has_wifi_connection; then
-            # We have WiFi, make sure captive portal is off
-            stop_wifi_connect
-
-            # Periodically ensure autoconnect is enabled for saved networks
-            if [ $((current_time - last_network_check)) -gt $network_check_interval ]; then
-                ensure_autoconnect
-                last_network_check=$current_time
-            fi
-
-            # Also check if we have internet
-            if has_internet; then
-                # All good, check again later
-                sleep $CHECK_INTERVAL
-            else
-                log "WiFi connected but no internet, waiting..."
-                sleep $((CHECK_INTERVAL / 2))  # Check more frequently
-            fi
-        else
-            # No WiFi connection detected
-
-            # First check if we have saved networks and try to connect
-            if has_saved_networks; then
-                log "No connection but saved networks exist, trying to reconnect..."
-                ensure_autoconnect
-                try_connect_saved_networks
-
-                # Give it a moment to connect
-                sleep 10
-
-                # Check again
-                if has_wifi_connection; then
-                    log "Successfully reconnected to saved network"
-                    continue
-                fi
-            fi
-
-            # Still no connection, start captive portal if not already running
-            if ! wifi_connect_running; then
-                if has_saved_networks; then
-                    log "Could not connect to saved networks, starting captive portal..."
-                else
-                    log "No saved networks found, starting captive portal..."
-                fi
-                start_wifi_connect
-            fi
-
-            # Check more frequently when in AP mode
-            sleep $((CHECK_INTERVAL / 3))
-        fi
+# Wait up to $1 seconds for any connection.
+wait_online() {
+    local max="$1" waited=0
+    while [ "$waited" -lt "$max" ]; do
+        is_online && return 0
+        sleep 5
+        waited=$((waited + 5))
     done
+    is_online
 }
 
-# Signal handlers
+# Ask NetworkManager to bring the best saved network up on the wifi device.
+kick_saved_networks() {
+    local iface
+    iface=$(wifi_iface)
+    [ -n "$iface" ] || return 1
+    ensure_radio
+    nmcli device connect "$iface" >/dev/null 2>&1 || true
+}
+
+STATE=""
+set_state() {
+    if [ "$1" != "$STATE" ]; then
+        log "State: ${STATE:-boot} -> $1${2:+ ($2)}"
+        STATE="$1"
+    fi
+}
+
 handle_term() {
-    log "Received TERM signal, shutting down..."
-    stop_wifi_connect
+    log "Stopping"
+    stop_portal
     exit 0
 }
-
-handle_hup() {
-    log "Received HUP signal, reloading..."
-    # Could reload config here if needed
-}
-
 trap handle_term TERM INT
-trap handle_hup HUP
 
-# Main execution
 main() {
-    log "===== WiFi Connect Manager Starting ====="
-    log "PID: $$"
+    log "WiFi Connect Manager starting (PID $$)"
 
-    # Ensure network persistence is configured
-    if [ -x "/opt/ossuary/scripts/ensure-network-persistence.sh" ]; then
-        log "Running network persistence check..."
+    if [ -x /opt/ossuary/scripts/ensure-network-persistence.sh ]; then
         /opt/ossuary/scripts/ensure-network-persistence.sh
     fi
 
-    # On boot, wait a bit for the network to come up
-    wait_for_network_on_boot
+    # Let NetworkManager finish its own startup and autoconnect first.
+    nm-online -s -q -t 60 2>/dev/null || true
 
-    # Start the monitoring loop
-    monitor_network
+    if ! is_online && has_saved_wifi; then
+        log "Saved networks found; giving them ${BOOT_GRACE}s to connect"
+        ensure_radio
+        kick_saved_networks
+        wait_online "$BOOT_GRACE"
+    fi
+
+    while true; do
+        if is_online; then
+            # Ethernet plugged in, or a network joined: the hotspot must go.
+            stop_portal
+            set_state online
+            sleep "$CHECK_INTERVAL"
+            continue
+        fi
+
+        if [ -z "$(wifi_iface)" ]; then
+            set_state no-wifi "no wifi device; plug in ethernet"
+            sleep 30
+            continue
+        fi
+
+        if portal_running; then
+            set_state portal
+            sleep "$CHECK_INTERVAL"
+            continue
+        fi
+
+        # Offline and no portal.
+        case "$STATE" in
+            online)
+                if has_saved_wifi; then
+                    set_state reconnecting "connection lost"
+                    kick_saved_networks
+                    wait_online "$LOST_GRACE" && continue
+                fi
+                ;;
+            portal)
+                # wifi-connect exited: either nobody used it before the timeout,
+                # or a connection attempt through it failed.
+                if has_saved_wifi; then
+                    set_state reconnecting "portal closed"
+                    kick_saved_networks
+                    wait_online "$RETRY_WINDOW" && continue
+                fi
+                ;;
+        esac
+
+        start_portal
+        set_state portal
+        sleep "$CHECK_INTERVAL"
+    done
 }
 
-# Run main function
 main "$@"

@@ -66,8 +66,12 @@ WIFI_IF=$(ip link 2>/dev/null | grep -E '^[0-9]+: wl' | cut -d: -f2 | tr -d ' ' 
 if [ -n "$WIFI_IF" ]; then
     echo -e "Interface:      ${CYAN}$WIFI_IF${NC}"
 
-    # Check if connected
-    SSID=$(iwgetid -r 2>/dev/null)
+    # Check if connected (client mode; the setup hotspot doesn't count)
+    SSID=$(nmcli -t -f ACTIVE,SSID,MODE device wifi list --rescan no 2>/dev/null | awk -F: '$1=="yes" {print $2; exit}')
+    ACTIVE_UUID=$(nmcli -g GENERAL.CON-UUID device show "$WIFI_IF" 2>/dev/null)
+    if [ -n "$ACTIVE_UUID" ] && [ "$(nmcli -g 802-11-wireless.mode connection show "$ACTIVE_UUID" 2>/dev/null)" = "ap" ]; then
+        SSID=""
+    fi
     if [ -n "$SSID" ]; then
         echo -e "WiFi Status:    ${GREEN}Connected${NC}"
         echo -e "Network:        $SSID"
@@ -88,6 +92,9 @@ fi
 echo ""
 echo -e "${BLUE}Configuration:${NC}"
 echo "─────────────────────────────────────────────────────────"
+if [ -r /etc/ossuary/setup-code ]; then
+    echo -e "Setup code:     ${CYAN}$(cat /etc/ossuary/setup-code)${NC}"
+fi
 
 # Check config
 if [ -f /etc/ossuary/config.json ]; then

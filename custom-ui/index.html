@@ -319,6 +319,26 @@
         .spinner.show { display: block; }
         @keyframes spin { 0% { transform: rotate(0deg); } 100% { transform: rotate(360deg); } }
 
+        /* Status banner */
+        .status-banner {
+            padding: var(--space-md) var(--space-xl); border-bottom: 1px solid var(--ink);
+            font-size: 12px; display: none; gap: var(--space-sm); align-items: center;
+        }
+        .status-banner.show { display: flex; }
+        .status-banner .dot { width: 8px; height: 8px; border-radius: 50%; flex-shrink: 0; background: var(--ink-muted); }
+        .status-banner.setup { background: var(--warning-bg); }
+        .status-banner.setup .dot { background: var(--warning); }
+        .status-banner.online { background: var(--success-bg); }
+        .status-banner.online .dot { background: var(--success); }
+        .status-banner.offline { background: var(--error-bg); }
+        .status-banner.offline .dot { background: var(--error); }
+        .code-input { font-family: 'Space Mono', monospace; font-size: 20px; letter-spacing: 4px; text-align: center; text-transform: uppercase; }
+        .radio-row { display: flex; gap: var(--space-sm); margin-bottom: var(--space-md); }
+        .radio-row label { flex: 1; border: 1px solid var(--border); padding: var(--space-md); cursor: pointer; font-size: 12px; }
+        .radio-row input { width: auto; margin-right: 6px; }
+        .radio-row label:has(input:checked) { border-color: var(--teal); background: var(--teal-muted); }
+        .hint { font-size: 11px; color: var(--ink-muted); margin-top: var(--space-xs); }
+
         /* Responsive */
         @media (max-width: 500px) {
             body { padding: var(--space-sm); }
@@ -346,6 +366,8 @@
                 <p>Configure your display</p>
             </div>
         </div>
+
+        <div class="status-banner" id="status-banner"><span class="dot"></span><span id="status-text"></span></div>
 
         <div class="tab-container">
             <button class="tab active" onclick="switchTab('wifi')">WiFi</button>
@@ -379,12 +401,12 @@
                 </div>
 
                 <button type="submit" class="btn-primary" id="wifi-connect-btn">Connect</button>
-                <button type="button" class="btn-secondary" onclick="loadNearbyNetworks()">Refresh Networks</button>
+                <button type="button" class="btn-secondary" onclick="loadNearbyNetworks(true)">Refresh Networks</button>
             </form>
 
-            <div class="info-box">
+            <div class="info-box" id="wifi-after-box">
                 <h3>After Connecting</h3>
-                <p>Access config at: <code id="config-url">http://loading...</code></p>
+                <p>The kiosk's screen shows its address. On the same network, open <code id="config-url">http://ossuary.local</code> and enter the setup code shown on the kiosk.</p>
             </div>
         </div>
 
@@ -395,6 +417,15 @@
 
             <button class="btn-primary" onclick="showAddNetworkModal()">Add Network</button>
 
+            <div class="input-group" style="margin-top: var(--space-xl);">
+                <label for="wifi-country">WiFi Country</label>
+                <div style="display: flex; gap: var(--space-sm);">
+                    <input type="text" id="wifi-country" maxlength="2" placeholder="e.g. US, GB, DE" style="text-transform: uppercase; flex: 1;">
+                    <button class="btn-small" style="padding: 0 var(--space-lg);" onclick="saveWifiCountry()">Set</button>
+                </div>
+                <p class="hint" id="wifi-country-hint">Sets the radio's legal channels. Needed for 5 GHz networks.</p>
+            </div>
+
             <div class="info-box">
                 <h3>Pre-configure Networks</h3>
                 <p>Add networks before arriving at a venue. The device will auto-connect when in range.</p>
@@ -403,6 +434,7 @@
 
         <!-- Display Tab -->
         <div id="display-tab" class="tab-content">
+            <div id="display-message" class="message"></div>
             <div id="preset-view">
                 <p class="section-label">What will this kiosk display?</p>
                 <div class="preset-grid">
@@ -459,9 +491,15 @@
             <div id="lumencanvas-config" class="config-panel">
                 <span class="back-link" onclick="showPresetView()">&larr; Back</span>
                 <h4>LumenCanvas Configuration</h4>
-                <div class="input-group">
-                    <label for="lc-url">Canvas URL or ID</label>
-                    <input type="text" id="lc-url" placeholder="https://lumencanvas.studio/projector/proj_xxx">
+                <div class="radio-row">
+                    <label><input type="radio" name="lc-mode" value="pair" checked onchange="updateLcMode()">Pair with a code</label>
+                    <label><input type="radio" name="lc-mode" value="url" onchange="updateLcMode()">Specific projector</label>
+                </div>
+                <p class="hint" id="lc-pair-hint" style="margin-bottom: var(--space-lg);">The kiosk shows a pairing code. In LumenCanvas, open <b>Remote Projectors</b> and enter it to send any project to this display. It stays paired after restarts.</p>
+                <div class="input-group" id="lc-url-group" style="display: none;">
+                    <label for="lc-url">Projector link or ID</label>
+                    <input type="text" id="lc-url" placeholder="https://lumencanvas.studio/projector/...">
+                    <p class="hint">The project must be public, or use pairing instead.</p>
                 </div>
 
                 <p class="section-label">Display Mode</p>
@@ -481,15 +519,7 @@
                     <div class="checkbox-item"><input type="checkbox" id="lc-gpu-raster" checked><label for="lc-gpu-raster">GPU rasterization</label></div>
                 </div>
 
-                <p class="section-label">Browser Behavior</p>
-                <div class="checkbox-group">
-                    <div class="checkbox-item"><input type="checkbox" id="lc-wayland" checked><label for="lc-wayland">Wayland mode (required for Pi OS 2024+)</label></div>
-                    <div class="checkbox-item"><input type="checkbox" id="lc-no-first-run" checked><label for="lc-no-first-run">Skip first-run wizard</label></div>
-                    <div class="checkbox-item"><input type="checkbox" id="lc-disable-translate" checked><label for="lc-disable-translate">Disable translate prompts</label></div>
-                    <div class="checkbox-item"><input type="checkbox" id="lc-disable-notifications" checked><label for="lc-disable-notifications">Disable notifications</label></div>
-                    <div class="checkbox-item"><input type="checkbox" id="lc-disable-crash-bubble" checked><label for="lc-disable-crash-bubble">Disable crash/restore prompts</label></div>
-                    <div class="checkbox-item"><input type="checkbox" id="lc-separate-profile" checked><label for="lc-separate-profile">Use isolated kiosk profile</label></div>
-                </div>
+                <p class="hint" style="margin-bottom: var(--space-lg);">Display server, kiosk profile, crash-restore and first-run prompts are handled automatically.</p>
 
                 <div class="input-group" style="margin-top: var(--space-lg);">
                     <label>Command Preview</label>
@@ -510,9 +540,7 @@
                 <p class="section-label">Display Options</p>
                 <div class="checkbox-group">
                     <div class="checkbox-item"><input type="checkbox" id="web-kiosk" checked><label for="web-kiosk">Kiosk mode (fullscreen)</label></div>
-                    <div class="checkbox-item"><input type="checkbox" id="web-wayland" checked><label for="web-wayland">Wayland mode (Pi OS 2024+)</label></div>
                     <div class="checkbox-item"><input type="checkbox" id="web-webgpu"><label for="web-webgpu">WebGPU acceleration</label></div>
-                    <div class="checkbox-item"><input type="checkbox" id="web-separate-profile" checked><label for="web-separate-profile">Use isolated kiosk profile</label></div>
                 </div>
                 <button class="btn-primary" onclick="saveWebKioskConfig()">Save & Apply</button>
             </div>
@@ -522,7 +550,8 @@
                 <h4>Custom Command</h4>
                 <div class="input-group">
                     <label for="startup-cmd">Startup Command</label>
-                    <textarea id="startup-cmd" placeholder="DISPLAY=:0 chromium --kiosk https://example.com"></textarea>
+                    <textarea id="startup-cmd" placeholder="chromium --kiosk https://example.com"></textarea>
+                    <p class="hint">Runs as the desktop user inside its display session. Chromium commands get kiosk flags added automatically.</p>
                 </div>
                 <button class="btn-primary" onclick="saveCustomCommand()">Save & Apply</button>
             </div>
@@ -583,7 +612,8 @@
                     <option value="ossuary-process">Kiosk Process</option>
                     <option value="ossuary-web">Config Server</option>
                     <option value="ossuary-connection-monitor">Connection Monitor</option>
-                    <option value="wifi-connect">WiFi Connect</option>
+                    <option value="wifi-connect">WiFi &amp; Setup Hotspot</option>
+                    <option value="captive-portal-proxy">Port 80 Proxy</option>
                 </select>
             </div>
 
@@ -615,6 +645,7 @@
 
         <!-- Schedule Tab -->
         <div id="schedule-tab" class="tab-content">
+            <div id="clock-warning" class="message error">The clock isn't synchronised yet (no internet time). Schedule rules are paused until it is.</div>
             <div class="timezone-display">
                 <div class="timezone-label">Timezone</div>
                 <div class="timezone-value" id="current-timezone">Loading...</div>
@@ -635,7 +666,7 @@
 
             <div class="info-box" style="border-color: var(--teal); margin-top: var(--space-lg);">
                 <h3>Supported Actions</h3>
-                <p>Refresh and Restart actions work immediately. Profile switching is saved but requires manual application.</p>
+                <p>Refresh reloads the page, Restart restarts the browser, and Switch changes to a display you have saved on the Display tab.</p>
             </div>
 
             <div class="info-box">
@@ -712,10 +743,6 @@
                         <option value="restart">Restart process</option>
                     </select>
                 </div>
-                <div class="input-group" id="schedule-until-group">
-                    <label>End Time (optional)</label>
-                    <input type="time" id="schedule-end-time" placeholder="Leave empty if no end">
-                </div>
             </div>
             <div class="modal-footer">
                 <button class="btn-primary" onclick="saveScheduleRule()">Add Rule</button>
@@ -744,112 +771,221 @@
         </div>
     </div>
 
+    <!-- Setup Code Modal -->
+    <div class="modal-overlay" id="code-modal">
+        <div class="modal">
+            <div class="modal-header">
+                <h3>Setup Code</h3>
+                <button class="modal-close" onclick="cancelCodePrompt()">&times;</button>
+            </div>
+            <form onsubmit="submitCode(); return false;">
+                <div class="modal-body">
+                    <p style="font-size: 12px; color: var(--ink-muted); margin-bottom: var(--space-lg);">Enter the code shown on the kiosk's screen. You can also find it in <code>/boot/firmware/ossuary-setup-code.txt</code> on the SD card, or with <code>sudo cat /etc/ossuary/setup-code</code>.</p>
+                    <input type="text" id="code-input" class="code-input" placeholder="XXXX-XXXX" autocomplete="one-time-code" autocapitalize="characters" spellcheck="false">
+                    <div id="code-error" class="message error" style="margin: var(--space-md) 0 0;"></div>
+                </div>
+                <div class="modal-footer">
+                    <button type="submit" class="btn-primary">Unlock</button>
+                </div>
+            </form>
+        </div>
+    </div>
+
     <script>
         let selectedNetwork = null;
         let systemHostname = 'ossuary';
         let scheduleRules = [];
         let savedNetworks = [];
-        let currentConfig = null;
-        let pollInterval = null;
+        let profiles = {};
+        let status = null;
+        let networksTimer = null;
+        let protectedLoaded = false;
 
-        // Initialize
+        // ------------------------------------------------------------------
+        // Setup code. Every /api call except /api/status needs it; it is
+        // shown on the kiosk's own screen. Joining WiFi from the setup
+        // hotspot (/networks, /connect) does not.
+        // ------------------------------------------------------------------
+        const CODE_KEY = 'ossuary_setup_code';
+        let codeWaiters = [];
+
+        function storedCode() {
+            try { return localStorage.getItem(CODE_KEY) || ''; } catch (e) { return ''; }
+        }
+        function storeCode(code) {
+            try { localStorage.setItem(CODE_KEY, code); } catch (e) {}
+        }
+
+        function promptForCode(errorText) {
+            const err = document.getElementById('code-error');
+            err.textContent = errorText || '';
+            err.className = errorText ? 'message error show' : 'message error';
+            showModal('code-modal');
+            setTimeout(() => document.getElementById('code-input').focus(), 50);
+            return new Promise(resolve => codeWaiters.push(resolve));
+        }
+
+        async function submitCode() {
+            const code = document.getElementById('code-input').value.trim().toUpperCase();
+            if (!code) return;
+            const r = await fetch('/api/auth/check', { headers: { 'X-Ossuary-Code': code } });
+            if (r.status === 429) {
+                const data = await r.json().catch(() => ({}));
+                document.getElementById('code-error').textContent = data.error || 'Too many attempts';
+                document.getElementById('code-error').className = 'message error show';
+                return;
+            }
+            if (!r.ok) {
+                document.getElementById('code-error').textContent = "That code didn't match. Check the kiosk's screen.";
+                document.getElementById('code-error').className = 'message error show';
+                return;
+            }
+            storeCode(code);
+            hideModal('code-modal');
+            document.getElementById('code-input').value = '';
+            codeWaiters.splice(0).forEach(fn => fn(true));
+            if (!protectedLoaded) loadProtected();
+        }
+
+        function cancelCodePrompt() {
+            hideModal('code-modal');
+            codeWaiters.splice(0).forEach(fn => fn(false));
+        }
+
+        // fetch() for the protected API: adds the code, asks for it on 401,
+        // and retries once it is entered.
+        async function api(path, options = {}) {
+            const opts = { ...options, headers: { ...(options.headers || {}) } };
+            if (opts.body !== undefined && typeof opts.body !== 'string') {
+                opts.body = JSON.stringify(opts.body);
+                opts.headers['Content-Type'] = 'application/json';
+            }
+            for (let attempt = 0; attempt < 3; attempt++) {
+                opts.headers['X-Ossuary-Code'] = storedCode();
+                const response = await fetch(path, opts);
+                if (response.status === 429) {
+                    // Locked out after too many wrong codes: say so instead of failing silently.
+                    const data = await response.clone().json().catch(() => ({}));
+                    promptForCode(data.error || 'Too many wrong setup codes. Try again in a few minutes.');
+                    return response;
+                }
+                if (response.status !== 401) return response;
+                const ok = await promptForCode(storedCode() ? "That code didn't match. Check the kiosk's screen." : '');
+                if (!ok) return response;
+            }
+            return fetch(path, opts);
+        }
+
+        async function apiJson(path, options) {
+            const response = await api(path, options);
+            let data = {};
+            try { data = await response.json(); } catch (e) {}
+            if (!response.ok) {
+                const error = new Error(data.error || `${response.status} ${response.statusText}`);
+                error.status = response.status;
+                throw error;
+            }
+            return data;
+        }
+
+        // ------------------------------------------------------------------
+        // Start-up
+        // ------------------------------------------------------------------
         async function init() {
+            await loadStatus();
             loadNearbyNetworks();
+            startNetworkPolling();
+            document.addEventListener('visibilitychange', startNetworkPolling);
+            // In setup-hotspot mode the first job is WiFi: don't ask for the
+            // code until a protected tab is opened. Otherwise load everything.
+            if (storedCode() || !(status && status.ap_mode)) loadProtected();
+        }
+
+        function loadProtected() {
+            protectedLoaded = true;
+            fetchSystemInfo();
+            loadCurrentConfig();
             loadSavedNetworks();
             loadSchedule();
             loadTimezone();
-            fetchSystemInfo();
-            loadCurrentConfig();
-            if (pollInterval) clearInterval(pollInterval);
-            pollInterval = setInterval(loadNearbyNetworks, 15000);
+        }
+
+        async function loadStatus() {
+            try {
+                const r = await fetch('/api/status');
+                status = await r.json();
+            } catch (e) {
+                status = null;
+            }
+            const banner = document.getElementById('status-banner');
+            const text = document.getElementById('status-text');
+            if (!status) { banner.className = 'status-banner'; return; }
+            systemHostname = status.hostname || systemHostname;
+            if (status.ap_mode) {
+                banner.className = 'status-banner show setup';
+                text.textContent = 'Setup mode: choose the WiFi network this kiosk should use.';
+            } else if (status.connection === 'wifi') {
+                banner.className = 'status-banner show online';
+                text.textContent = `Online via WiFi "${status.ssid}"` + (status.ip ? ` (${status.ip})` : '');
+            } else if (status.connection === 'ethernet') {
+                banner.className = 'status-banner show online';
+                text.textContent = 'Online via ethernet' + (status.ip ? ` (${status.ip})` : '');
+            } else {
+                banner.className = 'status-banner show offline';
+                text.textContent = 'Offline. If no saved network appears, the "Ossuary-Setup" hotspot will open shortly.';
+            }
+            document.getElementById('config-url').textContent = `http://${systemHostname}.local`;
         }
 
         // Load current config and detect active preset
         async function loadCurrentConfig() {
             try {
-                const response = await fetch('/api/startup');
-                if (response.ok) {
-                    const data = await response.json();
-                    currentConfig = { startup_command: data.command || '' };
-                    parseAndPopulateForms(currentConfig.startup_command);
-                }
+                const [startup, prof] = await Promise.all([apiJson('/api/startup'), apiJson('/api/profiles')]);
+                profiles = prof.profiles || {};
+                parseAndPopulateForms(startup.command || '');
+                updateScheduleActionOptions();
             } catch (e) {
-                console.log('Could not load current config');
+                console.log('Could not load current config', e);
             }
         }
 
         // Parse startup command and populate appropriate forms
         function parseAndPopulateForms(command) {
-            // Clear active indicators
             document.querySelectorAll('.preset-card').forEach(c => c.classList.remove('active'));
-
+            document.getElementById('startup-cmd').value = command;
             if (!command) return;
 
-            // Extract URL from command (look for quoted URL or URL at end)
             const urlMatch = command.match(/"([^"]+)"/) || command.match(/'([^']+)'/) || command.match(/https?:\/\/[^\s"']+/);
             const url = urlMatch ? (urlMatch[1] || urlMatch[0]) : '';
+            const has = flag => command.includes(flag);
 
-            // Detect common flags
-            const hasKiosk = command.includes('--kiosk');
-            const hasWebGPU = command.includes('WebGPU');
-            const hasAutoplay = command.includes('--autoplay-policy=no-user-gesture-required');
-            const hasWayland = command.includes('--ozone-platform=wayland') || command.includes('WAYLAND_DISPLAY');
-            const hasVulkan = command.includes('Vulkan');
-            const hasGpuRaster = command.includes('gpu-rasterization') || command.includes('CanvasOopRasterization');
-            const hasNoFirstRun = command.includes('--no-first-run');
-            const hasDisableTranslate = command.includes('--disable-translate');
-            const hasDisableNotifications = command.includes('--disable-notifications');
-            const hasDisableCrashBubble = command.includes('--disable-session-crashed-bubble');
-            const hasSeparateProfile = command.includes('--user-data-dir');
-
-            // Determine preset type based on URL and mark active
             let activePreset = 'custom';
-            if (url.includes('lumencanvas.studio') || url.includes('lumencanvas.com')) {
-                // LumenCanvas preset
+            if (/lumencanvas\.(studio|com)/.test(url)) {
                 activePreset = 'lumencanvas';
-                document.getElementById('lc-url').value = url;
-                document.getElementById('lc-kiosk').checked = hasKiosk;
-                document.getElementById('lc-autoplay').checked = hasAutoplay;
-                document.getElementById('lc-webgpu').checked = hasWebGPU;
-                document.getElementById('lc-vulkan').checked = hasVulkan;
-                document.getElementById('lc-gpu-raster').checked = hasGpuRaster;
-                document.getElementById('lc-wayland').checked = hasWayland;
-                document.getElementById('lc-no-first-run').checked = hasNoFirstRun;
-                document.getElementById('lc-disable-translate').checked = hasDisableTranslate;
-                document.getElementById('lc-disable-notifications').checked = hasDisableNotifications;
-                document.getElementById('lc-disable-crash-bubble').checked = hasDisableCrashBubble;
-                document.getElementById('lc-separate-profile').checked = hasSeparateProfile;
-                // Update preview
-                updateLcCommandPreview();
-            } else if (command.includes('chromium') && url) {
-                // Web Kiosk preset
+                const pairing = /\/remote\/?$/.test(url);
+                document.querySelector(`input[name="lc-mode"][value="${pairing ? 'pair' : 'url'}"]`).checked = true;
+                document.getElementById('lc-url').value = pairing ? '' : url;
+                document.getElementById('lc-kiosk').checked = has('--kiosk');
+                document.getElementById('lc-autoplay').checked = has('--autoplay-policy=no-user-gesture-required');
+                document.getElementById('lc-webgpu').checked = has('WebGPU');
+                document.getElementById('lc-vulkan').checked = has('Vulkan');
+                document.getElementById('lc-gpu-raster').checked = has('gpu-rasterization') || has('CanvasOopRasterization');
+                updateLcMode();
+            } else if (/chromium/.test(command) && url) {
                 activePreset = 'webgpu';
                 document.getElementById('web-url').value = url;
-                document.getElementById('web-kiosk').checked = hasKiosk;
-                document.getElementById('web-wayland').checked = hasWayland;
-                document.getElementById('web-webgpu').checked = hasWebGPU;
-                document.getElementById('web-separate-profile').checked = hasSeparateProfile;
+                document.getElementById('web-kiosk').checked = has('--kiosk');
+                document.getElementById('web-webgpu').checked = has('WebGPU');
             }
-
-            // Always populate custom command
-            document.getElementById('startup-cmd').value = command;
-
-            // Mark active preset card
             const activeCard = document.querySelector(`.preset-card[onclick*="'${activePreset}'"]`);
             if (activeCard) activeCard.classList.add('active');
         }
 
         async function fetchSystemInfo() {
             try {
-                const response = await fetch('/api/system/info');
-                if (response.ok) {
-                    const info = await response.json();
-                    systemHostname = info.hostname || 'ossuary';
-                    document.getElementById('config-url').textContent = info.config_url || `http://${systemHostname}.local:8081`;
-                }
-            } catch (e) {
-                document.getElementById('config-url').textContent = `http://${window.location.hostname}:8081`;
-            }
+                const info = await apiJson('/api/system/info');
+                systemHostname = info.hostname || 'ossuary';
+            } catch (e) {}
         }
 
         // Tab switching
@@ -860,35 +996,68 @@
             const tabMap = { wifi: 0, networks: 1, display: 2, control: 3, logs: 4, schedule: 5 };
             document.querySelectorAll('.tab')[tabMap[tab]].classList.add('active');
             document.getElementById(`${tab}-tab`).classList.add('active');
+            startNetworkPolling();
 
-            if (tab === 'networks') loadSavedNetworks();
-            if (tab === 'schedule') loadSchedule();
+            if (tab !== 'wifi' && !protectedLoaded) loadProtected();
+            if (tab === 'networks') { loadSavedNetworks(); loadWifiCountry(); }
+            if (tab === 'schedule') { loadSchedule(); loadTimezone(); }
             if (tab === 'display') loadCurrentConfig();
             if (tab === 'control') loadProcessStatus();
             if (tab === 'logs') loadLogs();
         }
 
-        function showMessage(id, text, type) {
+        function showMessage(id, text, type, persist) {
             const msg = document.getElementById(id);
-            if (msg) { msg.textContent = text; msg.className = `message ${type} show`; setTimeout(() => msg.classList.remove('show'), 5000); }
+            if (!msg) return;
+            msg.textContent = text;
+            msg.className = `message ${type} show`;
+            clearTimeout(msg._timer);
+            if (!persist) msg._timer = setTimeout(() => msg.classList.remove('show'), 6000);
         }
 
         // Modal helpers
         function showModal(id) { document.getElementById(id).classList.add('show'); }
         function hideModal(id) { document.getElementById(id).classList.remove('show'); }
         function showAddNetworkModal() { showModal('add-network-modal'); }
-        function showAddScheduleModal() { showModal('add-schedule-modal'); }
+        function showAddScheduleModal() { updateScheduleActionOptions(); showModal('add-schedule-modal'); }
         function showTimezoneModal() { showModal('timezone-modal'); }
 
-        // WiFi functions
-        async function loadNearbyNetworks() {
+        // Escape HTML special characters for safe insertion
+        function escapeHtml(str) {
+            const div = document.createElement('div');
+            div.textContent = str == null ? '' : String(str);
+            return div.innerHTML;
+        }
+
+        // ------------------------------------------------------------------
+        // WiFi
+        // ------------------------------------------------------------------
+
+        // Poll the nearby list only while the WiFi tab is on screen.
+        function startNetworkPolling() {
+            clearInterval(networksTimer);
+            const wifiVisible = document.getElementById('wifi-tab').classList.contains('active');
+            if (wifiVisible && document.visibilityState === 'visible') {
+                networksTimer = setInterval(() => loadNearbyNetworks(false), 15000);
+            }
+        }
+
+        async function loadNearbyNetworks(rescan) {
+            const container = document.getElementById('nearby-networks');
             try {
-                const response = await fetch('/networks');
+                // While the hotspot is up these come from wifi-connect, which
+                // scanned before raising it. Otherwise from NetworkManager.
+                const response = await fetch(rescan ? '/networks?rescan=1' : '/networks', {
+                    headers: { 'X-Ossuary-Code': storedCode() }
+                });
+                if (response.status === 401) {
+                    container.innerHTML = '<div class="empty-state">Enter the setup code to scan from the LAN.</div>';
+                    return;
+                }
                 const networks = await response.json();
-                const container = document.getElementById('nearby-networks');
                 container.innerHTML = '';
 
-                if (!networks || networks.length === 0) {
+                if (!Array.isArray(networks) || networks.length === 0) {
                     container.innerHTML = '<div class="empty-state">No networks found</div>';
                     return;
                 }
@@ -899,16 +1068,16 @@
                 networks.sort((a, b) => (b.signal || 0) - (a.signal || 0));
                 networks.forEach(network => {
                     const ssid = network.ssid || network.SSID || 'Unknown';
-                    const signal = network.signal || 0;
+                    const encrypted = network.encrypted !== undefined ? network.encrypted : (network.security && network.security !== 'none');
                     const item = document.createElement('div');
-                    item.className = 'network-item';
-                    item.dataset.ssid = ssid; // Store raw SSID for onclick
-                    item.innerHTML = `<div><div class="network-name">${escapeHtml(ssid)}</div><div class="network-meta">${signal}% signal</div></div><div class="network-icon">${network.encrypted !== false ? lockIcon : openIcon}</div>`;
+                    item.className = 'network-item' + (ssid === selectedNetwork ? ' selected' : '');
+                    item.dataset.ssid = ssid;
+                    item.innerHTML = `<div><div class="network-name">${escapeHtml(ssid)}</div><div class="network-meta">${network.signal ? escapeHtml(network.signal) + '% signal' : escapeHtml(network.security || '')}</div></div><div class="network-icon">${encrypted ? lockIcon : openIcon}</div>`;
                     item.onclick = () => selectWifiNetwork(item.dataset.ssid, item);
                     container.appendChild(item);
                 });
             } catch (e) {
-                document.getElementById('nearby-networks').innerHTML = '<div class="empty-state">Error loading networks</div>';
+                container.innerHTML = '<div class="empty-state">Could not load networks</div>';
             }
         }
 
@@ -918,69 +1087,85 @@
             selectedNetwork = ssid;
             document.getElementById('wifi-ssid').value = ssid;
             document.getElementById('wifi-connect-btn').textContent = `Connect to ${ssid}`;
+            document.getElementById('wifi-password').focus();
         }
 
         async function connectWiFi() {
             const ssid = document.getElementById('wifi-ssid').value.trim() || selectedNetwork;
             const password = document.getElementById('wifi-password').value;
 
-            if (!ssid) { showMessage('wifi-message', 'Please select or enter a network', 'error'); return; }
+            if (!ssid) { showMessage('wifi-message', 'Select or type a network name first.', 'error'); return; }
+            if (password && (password.length < 8 || password.length > 63)) {
+                showMessage('wifi-message', 'WiFi passwords are 8 to 63 characters.', 'error'); return;
+            }
 
+            const inSetupMode = status && status.ap_mode;
             const btn = document.getElementById('wifi-connect-btn');
             btn.disabled = true; btn.textContent = 'Connecting...';
+
+            if (inSetupMode) {
+                // wifi-connect closes the hotspot to try the network, so this
+                // phone loses its connection mid-request. Say what happens next
+                // before that, instead of waiting for a reply that can't come.
+                showMessage('wifi-message',
+                    `Joining "${ssid}". The Ossuary-Setup hotspot closes now. If it worked, the kiosk's screen shows its new address. ` +
+                    `If the password was wrong, Ossuary-Setup comes back within a minute: reconnect to it and try again.`, 'success', true);
+            }
 
             try {
                 const response = await fetch('/connect', {
                     method: 'POST',
-                    headers: {'Content-Type': 'application/json'},
+                    headers: { 'Content-Type': 'application/json', 'X-Ossuary-Code': storedCode() },
                     body: JSON.stringify({ ssid, passphrase: password || '', identity: '' })
                 });
+                if (inSetupMode) return;
+                if (response.status === 401) {
+                    await promptForCode();
+                    return;
+                }
+                const data = await response.json().catch(() => ({}));
                 if (response.ok) {
-                    showMessage('wifi-message', 'Connecting...', 'success');
-                    // Also save to our list
-                    await saveNetworkToList(ssid, password, '');
+                    showMessage('wifi-message', `Connected to "${ssid}".`, 'success');
+                    loadStatus();
                 } else {
-                    showMessage('wifi-message', 'Connection failed', 'error');
+                    showMessage('wifi-message', data.error || 'Connection failed', 'error');
                 }
             } catch (e) {
-                showMessage('wifi-message', e.message, 'error');
+                if (!inSetupMode) showMessage('wifi-message', 'Lost contact with the kiosk while it switched networks. It may have joined the new network.', 'error', true);
             } finally {
                 btn.disabled = false; btn.textContent = 'Connect';
             }
         }
 
-        // Saved networks
-        async function loadSavedNetworks() {
+        async function loadWifiCountry() {
             try {
-                const response = await fetch('/api/saved-networks');
-                const data = await response.json();
-                // Merge config saved networks with NetworkManager networks
-                const configNetworks = data.saved_networks || [];
-                const nmNetworks = data.nm_networks || [];
+                const data = await apiJson('/api/wifi-country');
+                document.getElementById('wifi-country').value = data.country || '';
+                document.getElementById('wifi-country-hint').textContent = data.country
+                    ? 'Sets the radio\'s legal channels. Needed for 5 GHz networks.'
+                    : 'Not set: only 2.4 GHz networks may work. Enter your two-letter country code.';
+            } catch (e) {}
+        }
 
-                // Create a map of SSIDs we already have from config
-                const configSSIDs = new Set(configNetworks.map(n => n.ssid));
-
-                // Add NM networks that aren't in config
-                savedNetworks = [...configNetworks];
-                nmNetworks.forEach(nm => {
-                    if (!configSSIDs.has(nm.ssid)) {
-                        savedNetworks.push({ ssid: nm.ssid, from_nm: true });
-                    }
-                });
-
-                renderSavedNetworks();
+        async function saveWifiCountry() {
+            const country = document.getElementById('wifi-country').value.trim().toUpperCase();
+            try {
+                await apiJson('/api/wifi-country', { method: 'POST', body: { country } });
+                document.getElementById('wifi-country-hint').textContent = `WiFi country set to ${country}.`;
             } catch (e) {
-                savedNetworks = [];
-                renderSavedNetworks();
+                document.getElementById('wifi-country-hint').textContent = e.message;
             }
         }
 
-        // Escape HTML special characters for safe insertion
-        function escapeHtml(str) {
-            const div = document.createElement('div');
-            div.textContent = str;
-            return div.innerHTML;
+        // Saved networks (stored by NetworkManager; passwords never leave the device)
+        async function loadSavedNetworks() {
+            try {
+                const data = await apiJson('/api/saved-networks');
+                savedNetworks = data.saved_networks || [];
+            } catch (e) {
+                savedNetworks = [];
+            }
+            renderSavedNetworks();
         }
 
         function renderSavedNetworks() {
@@ -989,119 +1174,72 @@
                 container.innerHTML = '<div class="empty-state">No saved networks</div>';
                 return;
             }
-
             container.innerHTML = savedNetworks.map(n => {
-                const escapedSsid = escapeHtml(n.ssid);
-                const escapedNotes = n.notes ? escapeHtml(n.notes) : '';
+                const ssid = escapeHtml(n.ssid);
+                const meta = n.missing ? 'Not stored on the device any more'
+                    : (n.last_connected ? 'Last connected ' + new Date(n.last_connected).toLocaleDateString() : 'Saved on the device');
                 return `
                 <div class="saved-network-item">
                     <div class="saved-network-info">
-                        <div class="saved-network-ssid">${escapedSsid}</div>
-                        ${n.notes ? `<div class="saved-network-notes">${escapedNotes}</div>` : ''}
-                        <div class="saved-network-meta">${n.from_nm ? 'Saved in system' : (n.last_connected ? 'Last: ' + new Date(n.last_connected).toLocaleDateString() : 'Never connected')}</div>
+                        <div class="saved-network-ssid">${ssid}</div>
+                        ${n.notes ? `<div class="saved-network-notes">${escapeHtml(n.notes)}</div>` : ''}
+                        <div class="saved-network-meta">${escapeHtml(meta)}</div>
                     </div>
                     <div class="network-actions">
-                        <button class="btn-small" onclick="connectSavedNetwork(this.dataset.ssid)" data-ssid="${escapedSsid}">Connect</button>
-                        <button class="btn-small danger" onclick="deleteNetwork(this.dataset.ssid)" data-ssid="${escapedSsid}">Delete</button>
+                        ${n.missing ? '' : `<button class="btn-small" onclick="connectSavedNetwork(this.dataset.ssid)" data-ssid="${ssid}">Connect</button>`}
+                        <button class="btn-small danger" onclick="deleteNetwork(this.dataset.ssid)" data-ssid="${ssid}">Delete</button>
                     </div>
-                </div>
-            `}).join('');
-        }
-
-        async function saveNetworkToList(ssid, password, notes) {
-            try {
-                const response = await fetch('/api/saved-networks', {
-                    method: 'POST',
-                    headers: {'Content-Type': 'application/json'},
-                    body: JSON.stringify({ ssid, password, notes, auto_connect: true })
-                });
-                if (!response.ok) {
-                    console.warn('Failed to save network to list:', ssid);
-                }
-            } catch (e) {
-                console.warn('Error saving network to list:', e.message);
-            }
+                </div>`;
+            }).join('');
         }
 
         async function saveNewNetwork() {
             const ssid = document.getElementById('new-network-ssid').value.trim();
             const password = document.getElementById('new-network-password').value;
             const notes = document.getElementById('new-network-notes').value.trim();
-
             if (!ssid) { alert('Network name required'); return; }
-
             try {
-                await fetch('/api/saved-networks', {
-                    method: 'POST',
-                    headers: {'Content-Type': 'application/json'},
-                    body: JSON.stringify({ ssid, password, notes, auto_connect: true })
-                });
+                await apiJson('/api/saved-networks', { method: 'POST', body: { ssid, password, notes } });
                 hideModal('add-network-modal');
-                document.getElementById('new-network-ssid').value = '';
-                document.getElementById('new-network-password').value = '';
-                document.getElementById('new-network-notes').value = '';
+                ['new-network-ssid', 'new-network-password', 'new-network-notes'].forEach(id => document.getElementById(id).value = '');
                 loadSavedNetworks();
             } catch (e) {
-                alert('Failed to save network');
+                alert('Could not save network: ' + e.message);
             }
         }
 
         async function connectSavedNetwork(ssid) {
             try {
-                const response = await fetch('/api/saved-networks/connect', {
-                    method: 'POST',
-                    headers: {'Content-Type': 'application/json'},
-                    body: JSON.stringify({ ssid })
-                });
-                if (response.ok) {
-                    alert('Connected to ' + ssid);
-                } else {
-                    alert('Failed to connect');
-                }
+                await apiJson('/api/saved-networks/connect', { method: 'POST', body: { ssid } });
+                alert('Connected to ' + ssid);
+                loadStatus();
             } catch (e) {
-                alert('Connection error');
+                alert(e.status ? 'Could not connect: ' + e.message : 'Lost contact with the kiosk while it switched networks.');
             }
         }
 
         async function deleteNetwork(ssid) {
-            // Check if this is the currently connected network
-            let isCurrentNetwork = false;
-            try {
-                const statusResp = await fetch('/api/status');
-                if (statusResp.ok) {
-                    const status = await statusResp.json();
-                    isCurrentNetwork = status.wifi_connected && status.ssid === ssid;
-                }
-            } catch (e) {}
-
-            const message = isCurrentNetwork
-                ? `"${ssid}" is your current network. Deleting it will disconnect you and the Pi will switch to hotspot mode. Continue?`
+            const isCurrent = status && status.connection === 'wifi' && status.ssid === ssid;
+            const message = isCurrent
+                ? `"${ssid}" is the network this kiosk is using. Deleting it disconnects the kiosk, and it will open the Ossuary-Setup hotspot. Continue?`
                 : `Delete "${ssid}"?`;
-
             if (!confirm(message)) return;
-
             try {
-                const response = await fetch('/api/saved-networks/delete', {
-                    method: 'POST',
-                    headers: {'Content-Type': 'application/json'},
-                    body: JSON.stringify({ ssid, remove_from_system: true })
-                });
-                if (response.ok) {
-                    loadSavedNetworks();
-                } else {
-                    const data = await response.json();
-                    alert(data.error || 'Failed to delete network');
-                }
+                await apiJson('/api/saved-networks/delete', { method: 'POST', body: { ssid, remove_from_system: true } });
+                loadSavedNetworks();
             } catch (e) {
-                alert('Error deleting network: ' + e.message);
+                alert('Could not delete network: ' + e.message);
             }
         }
 
+        // ------------------------------------------------------------------
         // Display presets
+        // ------------------------------------------------------------------
         function selectPreset(preset) {
             document.getElementById('preset-view').style.display = 'none';
             document.querySelectorAll('.config-panel').forEach(p => p.classList.remove('active'));
             document.getElementById(`${preset}-config`).classList.add('active');
+            if (preset === 'lumencanvas') updateLcCommandPreview();
         }
 
         function showPresetView() {
@@ -1109,135 +1247,116 @@
             document.getElementById('preset-view').style.display = 'block';
         }
 
-        async function saveCommand(command) {
+        async function saveCommand(command, preset) {
+            if (!command) { showMessage('display-message', 'Nothing to save yet.', 'error'); return; }
             try {
-                await fetch('/startup', {
-                    method: 'POST',
-                    headers: {'Content-Type': 'application/json'},
-                    body: JSON.stringify({ command })
-                });
-                alert('Saved! Process will restart.');
+                await apiJson('/api/startup', { method: 'POST', body: { command, preset } });
+                showMessage('display-message', 'Saved. The kiosk is switching to it now.', 'success');
+                loadCurrentConfig();
+                showPresetView();
             } catch (e) {
-                localStorage.setItem('startup_command', command);
-                alert('Saved locally');
+                showMessage('display-message', 'Not saved: ' + e.message, 'error', true);
             }
+        }
+
+        // The process manager adds the display session, kiosk profile and the
+        // standard kiosk flags itself, so these commands stay short and keep
+        // working whatever the desktop user is called.
+        const LUMENCANVAS_ORIGIN = 'https://lumencanvas.studio';
+
+        function updateLcMode() {
+            const pairing = document.querySelector('input[name="lc-mode"]:checked').value === 'pair';
+            document.getElementById('lc-url-group').style.display = pairing ? 'none' : 'block';
+            document.getElementById('lc-pair-hint').style.display = pairing ? 'block' : 'none';
+            updateLcCommandPreview();
+        }
+
+        function lumenCanvasUrl() {
+            if (document.querySelector('input[name="lc-mode"]:checked').value === 'pair') {
+                return `${LUMENCANVAS_ORIGIN}/remote`;
+            }
+            const value = document.getElementById('lc-url').value.trim();
+            if (!value) return '';
+            if (/^https?:\/\//.test(value)) return value;
+            // A bare project ID: LumenCanvas's output page is /projector/:id
+            return `${LUMENCANVAS_ORIGIN}/projector/${encodeURIComponent(value)}`;
         }
 
         function buildLumenCanvasCommand() {
-            let url = document.getElementById('lc-url').value.trim();
-            // Support various URL formats: full URL, projector ID, or canvas ID
-            if (url && !url.startsWith('http')) {
-                if (url.startsWith('proj_')) {
-                    url = `https://lumencanvas.studio/projector/${url}`;
-                } else {
-                    url = `https://lumencanvas.studio/canvas/${url}`;
-                }
-            }
-            if (!url) url = 'https://lumencanvas.studio';
-
-            // Environment variables for Wayland
-            let env = [];
-            if (document.getElementById('lc-wayland').checked) {
-                env.push('XDG_RUNTIME_DIR=/run/user/1000', 'WAYLAND_DISPLAY=wayland-0');
-            } else {
-                env.push('DISPLAY=:0');
-            }
-
-            // Base flags that are always useful
-            let flags = ['--password-store=basic', '--noerrdialogs', '--disable-infobars'];
-
-            // Wayland platform
-            if (document.getElementById('lc-wayland').checked) {
-                flags.push('--ozone-platform=wayland');
-            }
-
-            // Display mode
+            const url = lumenCanvasUrl();
+            if (!url) return '';
+            const flags = [];
             if (document.getElementById('lc-kiosk').checked) flags.push('--kiosk');
             if (document.getElementById('lc-autoplay').checked) flags.push('--autoplay-policy=no-user-gesture-required');
-
-            // GPU & Rendering
-            let enableFeatures = [];
-            if (document.getElementById('lc-vulkan').checked) enableFeatures.push('Vulkan', 'UseSkiaRenderer');
-            if (document.getElementById('lc-gpu-raster').checked) enableFeatures.push('CanvasOopRasterization');
+            const features = [];
+            if (document.getElementById('lc-vulkan').checked) features.push('Vulkan');
+            if (document.getElementById('lc-gpu-raster').checked) features.push('CanvasOopRasterization');
             if (document.getElementById('lc-webgpu').checked) {
-                enableFeatures.push('WebGPU');
-                flags.push('--enable-unsafe-webgpu', '--disable-gpu-sandbox');
+                features.push('WebGPU');
+                flags.push('--enable-unsafe-webgpu');
             }
-            if (enableFeatures.length > 0) {
-                flags.push(`--enable-features=${enableFeatures.join(',')}`);
-            }
-
-            // Browser behavior
-            if (document.getElementById('lc-no-first-run').checked) flags.push('--no-first-run', '--disable-default-apps');
-            if (document.getElementById('lc-disable-translate').checked) flags.push('--disable-translate', '--disable-features=TranslateUI');
-            if (document.getElementById('lc-disable-notifications').checked) flags.push('--disable-notifications');
-            if (document.getElementById('lc-disable-crash-bubble').checked) flags.push('--disable-session-crashed-bubble');
-            if (document.getElementById('lc-separate-profile').checked) flags.push('--user-data-dir=/home/pi/.config/chromium-kiosk');
-
-            return `${env.join(' ')} chromium ${flags.join(' ')} "${url}"`;
+            if (features.length) flags.push(`--enable-features=${features.join(',')}`);
+            return `chromium ${flags.join(' ')} "${url}"`;
         }
 
         function updateLcCommandPreview() {
-            const cmd = buildLumenCanvasCommand();
-            document.getElementById('lc-command-preview').value = cmd;
+            document.getElementById('lc-command-preview').value = buildLumenCanvasCommand() || 'Enter a projector link or ID';
         }
 
         async function saveLumenCanvasConfig() {
             const cmd = buildLumenCanvasCommand();
-            document.getElementById('lc-command-preview').value = cmd;
-            await saveCommand(cmd);
+            updateLcCommandPreview();
+            if (!cmd) { showMessage('display-message', 'Enter a projector link or ID, or choose pairing.', 'error'); return; }
+            await saveCommand(cmd, 'lumencanvas');
         }
 
         function buildWebKioskCommand() {
-            const url = document.getElementById('web-url').value.trim() || 'https://example.com';
-
-            // Environment variables for Wayland vs X11
-            let env = [];
-            if (document.getElementById('web-wayland').checked) {
-                env.push('XDG_RUNTIME_DIR=/run/user/1000', 'WAYLAND_DISPLAY=wayland-0');
-            } else {
-                env.push('DISPLAY=:0');
-            }
-
-            // Base flags
-            let flags = ['--password-store=basic', '--noerrdialogs', '--disable-infobars', '--no-first-run', '--disable-default-apps'];
-
-            // Wayland platform
-            if (document.getElementById('web-wayland').checked) {
-                flags.push('--ozone-platform=wayland');
-            }
-
-            // Display mode
+            let url = document.getElementById('web-url').value.trim();
+            if (!url) return '';
+            if (!/^[a-z]+:\/\//i.test(url)) url = 'https://' + url;
+            const flags = [];
             if (document.getElementById('web-kiosk').checked) flags.push('--kiosk');
-
-            // GPU features
             if (document.getElementById('web-webgpu').checked) {
-                flags.push('--enable-features=Vulkan,UseSkiaRenderer,WebGPU', '--enable-unsafe-webgpu', '--disable-gpu-sandbox');
+                flags.push('--enable-features=Vulkan,WebGPU', '--enable-unsafe-webgpu');
             }
-
-            // Isolated profile
-            if (document.getElementById('web-separate-profile').checked) {
-                flags.push('--user-data-dir=/home/pi/.config/chromium-kiosk');
-            }
-
-            return `${env.join(' ')} chromium ${flags.join(' ')} "${url}"`;
+            return `chromium ${flags.join(' ')} "${url}"`;
         }
 
-        async function saveWebKioskConfig() { await saveCommand(buildWebKioskCommand()); }
-        async function saveCustomCommand() { await saveCommand(document.getElementById('startup-cmd').value.trim()); }
+        async function saveWebKioskConfig() {
+            const cmd = buildWebKioskCommand();
+            if (!cmd) { showMessage('display-message', 'Enter a website address.', 'error'); return; }
+            await saveCommand(cmd, 'webgpu');
+        }
+        async function saveCustomCommand() { await saveCommand(document.getElementById('startup-cmd').value.trim(), 'custom'); }
 
+        document.addEventListener('input', e => {
+            if (e.target.closest && e.target.closest('#lumencanvas-config')) updateLcCommandPreview();
+        });
+
+        // ------------------------------------------------------------------
         // Schedule
+        // ------------------------------------------------------------------
+        const PROFILE_FOR_ACTION = { switch_lumencanvas: 'lumencanvas', switch_webgpu: 'webgpu_kiosk', switch_custom: 'custom' };
+
+        function updateScheduleActionOptions() {
+            document.querySelectorAll('#schedule-action option').forEach(opt => {
+                const profile = PROFILE_FOR_ACTION[opt.value];
+                if (!profile) return;
+                const saved = profiles[profile] && (profiles[profile].command || '').trim();
+                opt.disabled = !saved;
+                opt.textContent = opt.textContent.replace(/ \(save it first\)$/, '') + (saved ? '' : ' (save it first)');
+            });
+        }
+
         async function loadSchedule() {
             try {
-                const response = await fetch('/api/schedule');
-                const schedule = await response.json();
+                const schedule = await apiJson('/api/schedule');
                 document.getElementById('schedule-enabled').checked = schedule.enabled || false;
                 scheduleRules = schedule.rules || [];
-                renderScheduleRules();
             } catch (e) {
                 scheduleRules = [];
-                renderScheduleRules();
             }
+            renderScheduleRules();
         }
 
         function renderScheduleRules() {
@@ -1246,19 +1365,18 @@
                 container.innerHTML = '<div class="empty-state">No schedule rules yet</div>';
                 return;
             }
-
             const dayNames = { mon: 'Mo', tue: 'Tu', wed: 'We', thu: 'Th', fri: 'Fr', sat: 'Sa', sun: 'Su' };
             const allDays = ['mon', 'tue', 'wed', 'thu', 'fri', 'sat', 'sun'];
-
+            const describe = a => !a ? 'refresh' : a.type === 'switch_profile' ? `switch to ${a.profile}` : a.type;
             container.innerHTML = scheduleRules.map((rule, idx) => `
                 <div class="schedule-item ${rule.enabled === false ? 'disabled' : ''}">
                     <div class="schedule-info">
-                        <div class="schedule-name">${rule.name || 'Rule ' + (idx + 1)}</div>
-                        <div class="schedule-time">${rule.trigger?.time || '00:00'}${rule.until?.time ? ' - ' + rule.until.time : ''}</div>
+                        <div class="schedule-name">${escapeHtml(rule.name || 'Rule ' + (idx + 1))}</div>
+                        <div class="schedule-time">${escapeHtml(rule.trigger?.time || '00:00')}</div>
                         <div class="schedule-days">
                             ${allDays.map(d => `<span class="schedule-day ${(rule.trigger?.days || []).includes(d) ? 'active' : ''}">${dayNames[d]}</span>`).join('')}
                         </div>
-                        <div class="schedule-details">${rule.action?.type || 'refresh'}</div>
+                        <div class="schedule-details">${escapeHtml(describe(rule.action))}</div>
                     </div>
                     <div class="network-actions">
                         <button class="btn-small danger" onclick="deleteScheduleRule(${idx})">Delete</button>
@@ -1271,109 +1389,78 @@
             btn.classList.toggle('selected');
         }
 
+        async function saveSchedule() {
+            await apiJson('/api/schedule', {
+                method: 'POST',
+                body: { enabled: document.getElementById('schedule-enabled').checked, rules: scheduleRules }
+            });
+        }
+
         async function toggleSchedule() {
-            const enabled = document.getElementById('schedule-enabled').checked;
+            const box = document.getElementById('schedule-enabled');
             try {
-                const response = await fetch('/api/schedule', {
-                    method: 'POST',
-                    headers: {'Content-Type': 'application/json'},
-                    body: JSON.stringify({ enabled, rules: scheduleRules })
-                });
-                if (!response.ok) {
-                    alert('Failed to update schedule setting');
-                    // Revert checkbox
-                    document.getElementById('schedule-enabled').checked = !enabled;
-                }
+                await saveSchedule();
             } catch (e) {
-                alert('Error updating schedule: ' + e.message);
-                document.getElementById('schedule-enabled').checked = !enabled;
+                alert('Could not update the schedule: ' + e.message);
+                box.checked = !box.checked;
             }
         }
 
         async function saveScheduleRule() {
             const name = document.getElementById('schedule-name').value.trim() || 'New Rule';
             const startTime = document.getElementById('schedule-start-time').value;
-            const endTime = document.getElementById('schedule-end-time').value;
             const action = document.getElementById('schedule-action').value;
+            const selectedDays = [...document.querySelectorAll('#schedule-days .day-btn.selected')].map(b => b.dataset.day);
 
-            const selectedDays = [];
-            document.querySelectorAll('#schedule-days .day-btn.selected').forEach(btn => {
-                selectedDays.push(btn.dataset.day);
-            });
-
-            if (selectedDays.length === 0) {
-                alert('Please select at least one day');
-                return;
-            }
+            if (!startTime) { alert('Choose a time'); return; }
+            if (selectedDays.length === 0) { alert('Select at least one day'); return; }
 
             const rule = {
                 id: 'rule-' + Date.now(),
                 name,
                 enabled: true,
                 trigger: { type: 'time', time: startTime, days: selectedDays },
-                action: { type: action.startsWith('switch_') ? 'switch_profile' : action, profile: action.replace('switch_', '') }
+                action: PROFILE_FOR_ACTION[action]
+                    ? { type: 'switch_profile', profile: PROFILE_FOR_ACTION[action] }
+                    : { type: action }
             };
-
-            if (endTime) {
-                rule.until = { type: 'time', time: endTime };
-            }
-
             scheduleRules.push(rule);
-
             try {
-                await fetch('/api/schedule', {
-                    method: 'POST',
-                    headers: {'Content-Type': 'application/json'},
-                    body: JSON.stringify({ enabled: document.getElementById('schedule-enabled').checked, rules: scheduleRules })
-                });
+                await saveSchedule();
                 hideModal('add-schedule-modal');
                 document.getElementById('schedule-name').value = '';
                 document.getElementById('schedule-start-time').value = '08:00';
-                document.getElementById('schedule-end-time').value = '';
                 document.getElementById('schedule-action').selectedIndex = 0;
                 document.querySelectorAll('#schedule-days .day-btn').forEach(btn => btn.classList.remove('selected'));
-                renderScheduleRules();
             } catch (e) {
-                alert('Failed to save rule');
+                scheduleRules.pop();
+                alert('Could not save the rule: ' + e.message);
             }
+            renderScheduleRules();
         }
 
         async function deleteScheduleRule(idx) {
             if (!confirm('Delete this rule?')) return;
-            const deletedRule = scheduleRules.splice(idx, 1)[0];
+            const deleted = scheduleRules.splice(idx, 1)[0];
             try {
-                const response = await fetch('/api/schedule', {
-                    method: 'POST',
-                    headers: {'Content-Type': 'application/json'},
-                    body: JSON.stringify({ enabled: document.getElementById('schedule-enabled').checked, rules: scheduleRules })
-                });
-                if (!response.ok) {
-                    // Restore the rule if save failed
-                    scheduleRules.splice(idx, 0, deletedRule);
-                    alert('Failed to delete rule');
-                }
-                renderScheduleRules();
+                await saveSchedule();
             } catch (e) {
-                // Restore the rule if save failed
-                scheduleRules.splice(idx, 0, deletedRule);
-                alert('Error deleting rule: ' + e.message);
-                renderScheduleRules();
+                scheduleRules.splice(idx, 0, deleted);
+                alert('Could not delete the rule: ' + e.message);
             }
+            renderScheduleRules();
         }
 
         // Timezone
         async function loadTimezone() {
             try {
-                const response = await fetch('/api/timezone');
-                const data = await response.json();
+                const data = await apiJson('/api/timezone');
                 document.getElementById('current-timezone').textContent = data.effective_timezone || 'Unknown';
-
                 const select = document.getElementById('timezone-select');
-                select.innerHTML = '<option value="auto">Auto-detect</option>';
-                (data.available_timezones || []).forEach(tz => {
-                    select.innerHTML += `<option value="${tz}">${tz}</option>`;
-                });
+                select.innerHTML = '<option value="auto">Auto-detect</option>' +
+                    (data.available_timezones || []).map(tz => `<option value="${escapeHtml(tz)}">${escapeHtml(tz)}</option>`).join('');
                 select.value = data.config_timezone || 'auto';
+                document.getElementById('clock-warning').className = data.clock_synced ? 'message error' : 'message error show';
             } catch (e) {
                 document.getElementById('current-timezone').textContent = 'Unknown';
             }
@@ -1382,54 +1469,40 @@
         async function saveTimezone() {
             const timezone = document.getElementById('timezone-select').value;
             try {
-                await fetch('/api/timezone', {
-                    method: 'POST',
-                    headers: {'Content-Type': 'application/json'},
-                    body: JSON.stringify({ timezone })
-                });
+                await apiJson('/api/timezone', { method: 'POST', body: { timezone } });
                 hideModal('timezone-modal');
                 loadTimezone();
             } catch (e) {
-                alert('Failed to save timezone');
+                alert('Could not set the timezone: ' + e.message);
             }
         }
 
-        // Process control functions
+        // ------------------------------------------------------------------
+        // Control
+        // ------------------------------------------------------------------
         async function loadProcessStatus() {
             try {
-                const response = await fetch('/api/process/status');
-                const data = await response.json();
-
-                const stateEl = document.getElementById('process-state');
-                const indicatorEl = document.getElementById('process-indicator');
-                const commandDisplayEl = document.getElementById('process-command-display');
-                const currentCommandEl = document.getElementById('current-command-text');
-
-                // Update status display
+                const data = await apiJson('/api/process/status');
                 const state = data.state || 'unknown';
-                stateEl.textContent = state.charAt(0).toUpperCase() + state.slice(1);
-
-                // Update indicator color
-                if (state === 'running') {
-                    indicatorEl.style.background = 'var(--success)';
-                } else if (state === 'stopped' || state === 'inactive') {
-                    indicatorEl.style.background = 'var(--warning)';
-                } else if (state === 'failed') {
-                    indicatorEl.style.background = 'var(--error)';
-                } else {
-                    indicatorEl.style.background = 'var(--ink-muted)';
-                }
-
-                // Show current command
-                if (data.command) {
-                    commandDisplayEl.textContent = data.command;
-                    currentCommandEl.textContent = data.command;
-                } else {
-                    commandDisplayEl.textContent = 'No command configured';
-                    currentCommandEl.textContent = 'No command set';
-                }
+                document.getElementById('process-state').textContent = state.charAt(0).toUpperCase() + state.slice(1);
+                const colors = { running: 'var(--success)', starting: 'var(--warning)', stopped: 'var(--warning)', failed: 'var(--error)' };
+                document.getElementById('process-indicator').style.background = colors[state] || 'var(--ink-muted)';
+                const cmd = data.command || '';
+                document.getElementById('process-command-display').textContent = cmd || 'No display configured';
+                document.getElementById('current-command-text').textContent = cmd || 'No command set';
             } catch (e) {
-                document.getElementById('process-state').textContent = 'Error loading status';
+                document.getElementById('process-state').textContent = 'Could not load status';
+            }
+        }
+
+        async function postAction(path, body, successText) {
+            try {
+                const data = await apiJson(path, { method: 'POST', body: body || {} });
+                showMessage('control-message', data.message || successText, 'success');
+                return data;
+            } catch (e) {
+                showMessage('control-message', e.message, 'error');
+                return null;
             }
         }
 
@@ -1438,123 +1511,57 @@
             const originalText = btn.textContent;
             btn.disabled = true;
             btn.textContent = 'Working...';
-
-            try {
-                const response = await fetch(`/api/process/${action}`, { method: 'POST' });
-                const data = await response.json();
-
-                if (response.ok) {
-                    showMessage('control-message', data.message || `Process ${action} successful`, 'success');
-                } else {
-                    showMessage('control-message', data.error || `Failed to ${action} process`, 'error');
-                }
-
-                // Refresh status after a short delay
-                setTimeout(loadProcessStatus, 1000);
-            } catch (e) {
-                showMessage('control-message', `Error: ${e.message}`, 'error');
-            } finally {
-                btn.disabled = false;
-                btn.textContent = originalText;
-            }
+            await postAction(`/api/process/${action}`, {}, `Process ${action} sent`);
+            btn.disabled = false;
+            btn.textContent = originalText;
+            setTimeout(loadProcessStatus, 1500);
         }
 
         async function clearStartupCommand() {
-            if (!confirm('Clear the startup command? The kiosk will show the welcome page on next restart.')) return;
-
-            try {
-                const response = await fetch('/api/startup/clear', { method: 'POST' });
-                const data = await response.json();
-
-                if (response.ok) {
-                    showMessage('control-message', 'Startup command cleared', 'success');
-                    document.getElementById('current-command-text').textContent = 'No command set';
-                    document.getElementById('process-command-display').textContent = 'No command configured';
-                    loadProcessStatus();
-                } else {
-                    showMessage('control-message', data.error || 'Failed to clear command', 'error');
-                }
-            } catch (e) {
-                showMessage('control-message', `Error: ${e.message}`, 'error');
-            }
+            if (!confirm('Clear the startup command? The kiosk goes back to the welcome screen.')) return;
+            if (await postAction('/api/startup/clear', {}, 'Startup command cleared')) loadProcessStatus();
         }
 
-        async function setDisplayPower(on) {
-            try {
-                const response = await fetch('/api/display/power', {
-                    method: 'POST',
-                    headers: {'Content-Type': 'application/json'},
-                    body: JSON.stringify({ power: on ? 'on' : 'off' })
-                });
-                const data = await response.json();
+        function setDisplayPower(on) {
+            return postAction('/api/display/power', { power: on ? 'on' : 'off' }, `Display turned ${on ? 'on' : 'off'}`);
+        }
 
-                if (response.ok) {
-                    showMessage('control-message', `Display turned ${on ? 'on' : 'off'}`, 'success');
-                } else {
-                    showMessage('control-message', data.error || 'Failed to change display power', 'error');
-                }
-            } catch (e) {
-                showMessage('control-message', `Error: ${e.message}`, 'error');
-            }
+        function refreshPage() {
+            return postAction('/api/process/refresh', {}, 'Page reloaded');
         }
 
         async function takeScreenshot() {
+            showMessage('control-message', 'Capturing screenshot...', 'success');
             try {
-                showMessage('control-message', 'Capturing screenshot...', 'success');
-                const response = await fetch('/api/screenshot');
-
-                if (response.ok) {
-                    const blob = await response.blob();
-                    const url = URL.createObjectURL(blob);
-                    const a = document.createElement('a');
-                    a.href = url;
-                    a.download = `screenshot-${new Date().toISOString().slice(0,19).replace(/:/g,'-')}.png`;
-                    a.click();
-                    URL.revokeObjectURL(url);
-                    showMessage('control-message', 'Screenshot downloaded', 'success');
-                } else {
-                    const data = await response.json();
-                    showMessage('control-message', data.error || 'Failed to capture screenshot', 'error');
+                const response = await api('/api/screenshot');
+                if (!response.ok) {
+                    const data = await response.json().catch(() => ({}));
+                    showMessage('control-message', data.error || 'Screenshot failed', 'error');
+                    return;
                 }
+                const url = URL.createObjectURL(await response.blob());
+                const a = document.createElement('a');
+                a.href = url;
+                a.download = `screenshot-${new Date().toISOString().slice(0, 19).replace(/:/g, '-')}.png`;
+                a.click();
+                setTimeout(() => URL.revokeObjectURL(url), 1000);
+                showMessage('control-message', 'Screenshot downloaded', 'success');
             } catch (e) {
-                showMessage('control-message', `Error: ${e.message}`, 'error');
+                showMessage('control-message', e.message, 'error');
             }
         }
 
-        async function refreshPage() {
-            try {
-                const response = await fetch('/api/process/refresh', { method: 'POST' });
-                const data = await response.json();
-
-                if (response.ok) {
-                    showMessage('control-message', 'Page refresh signal sent', 'success');
-                } else {
-                    showMessage('control-message', data.error || 'Failed to refresh page', 'error');
-                }
-            } catch (e) {
-                showMessage('control-message', `Error: ${e.message}`, 'error');
-            }
-        }
-
-        // Logs functions
+        // Logs
         async function loadLogs(lines = 50) {
             const service = document.getElementById('log-service').value;
             const logOutput = document.getElementById('log-output');
             logOutput.textContent = 'Loading logs...';
-
             try {
-                const response = await fetch(`/api/logs/${service}?lines=${lines}`);
-                const data = await response.json();
-
-                if (response.ok && data.logs) {
-                    logOutput.textContent = data.logs || 'No logs available';
-                    // Scroll to bottom
-                    logOutput.scrollTop = logOutput.scrollHeight;
-                } else {
-                    logOutput.textContent = data.error || 'Failed to load logs';
-                }
+                const data = await apiJson(`/api/logs/${service}?lines=${lines}`);
+                logOutput.textContent = data.logs || 'No logs available';
+                logOutput.scrollTop = logOutput.scrollHeight;
             } catch (e) {
-                logOutput.textContent = `Error loading logs: ${e.message}`;
+                logOutput.textContent = `Could not load logs: ${e.message}`;
             }
         }
 

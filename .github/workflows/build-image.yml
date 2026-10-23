@@ -83,8 +83,10 @@ jobs:
           keyboard-layout: English (US)
           timezone: Etc/UTC
 
-          # Enable SSH by default
-          enable-ssh: 1
+          # SSH stays OFF in the published image: its default login (above) is
+          # public. Raspberry Pi Imager enables SSH with the user's own
+          # credentials when they ask for it in OS customisation.
+          enable-ssh: 0
 
           # Build settings
           enable-noobs: false

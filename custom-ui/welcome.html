@@ -4,9 +4,7 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Ossuary - Welcome</title>
-    <link rel="preconnect" href="https://fonts.googleapis.com">
-    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-    <link href="https://fonts.googleapis.com/css2?family=Sora:wght@300;400;500;600&family=Space+Mono&display=swap" rel="stylesheet">
+    <!-- No web fonts: this page is shown offline, before any network exists. -->
     <style>
         :root {
             --paper: #f5f1eb;
@@ -23,7 +21,7 @@
         }
 
         body {
-            font-family: 'Sora', sans-serif;
+            font-family: 'Sora', system-ui, 'DejaVu Sans', sans-serif;
             background: var(--paper);
             color: var(--ink);
             min-height: 100vh;
@@ -120,7 +118,7 @@
             display: flex;
             align-items: center;
             justify-content: center;
-            font-family: 'Space Mono', monospace;
+            font-family: 'Space Mono', 'DejaVu Sans Mono', monospace;
             font-size: clamp(0.6rem, 2vmin, 0.75rem);
             font-weight: 600;
             margin-right: 0.5rem;
@@ -140,7 +138,7 @@
         }
 
         .highlight {
-            font-family: 'Space Mono', monospace;
+            font-family: 'Space Mono', 'DejaVu Sans Mono', monospace;
             background: var(--paper);
             padding: 0.1rem 0.4rem;
             border-radius: 4px;
@@ -187,8 +185,9 @@
 
         /* Hide secondary card on very small displays to fit essentials */
         @media (max-height: 400px), (max-width: 400px) {
-            .card:last-of-type {
-                display: none;
+            /* Small or round screens: keep every card, drop the secondary text */
+            #code-card p, #config-ip-row {
+                display: none !important;
             }
         }
 
@@ -201,6 +200,13 @@
             .step-content p {
                 display: none;
             }
+        }
+        .code {
+            font-family: 'Space Mono', 'DejaVu Sans Mono', monospace;
+            font-size: clamp(1rem, 4.5vmin, 1.6rem);
+            font-weight: 700;
+            letter-spacing: 0.15em;
+            color: var(--ink);
         }
     </style>
 </head>
@@ -221,167 +227,124 @@
             </div>
             <h1>Welcome to Ossuary</h1>
         </div>
-        <p class="subtitle">Your kiosk is ready to be configured</p>
+        <p class="subtitle" id="subtitle">Your kiosk is ready to be configured</p>
 
-        <!-- Setup view - shown when not connected to WiFi -->
-        <div id="setup-view">
+        <!-- Setup view: the Ossuary-Setup hotspot is open -->
+        <div id="setup-view" style="display: none;">
             <div class="card">
                 <h2>Get Connected</h2>
-
                 <div class="step">
                     <div class="step-number">1</div>
                     <div class="step-content">
-                        <h3>Connect to the Setup Network</h3>
-                        <p>On your phone or laptop, join the WiFi network:</p>
+                        <h3>Join this WiFi network</h3>
+                        <p>On your phone or laptop:</p>
                         <span class="highlight">Ossuary-Setup</span>
                     </div>
                 </div>
-
                 <div class="step">
                     <div class="step-number">2</div>
                     <div class="step-content">
-                        <h3>Open the Configuration Page</h3>
-                        <p>A captive portal should open automatically. If not, visit:</p>
+                        <h3>Choose this kiosk's network</h3>
+                        <p>A setup page opens by itself. If it doesn't, visit:</p>
                         <span class="highlight">http://192.168.42.1</span>
                     </div>
                 </div>
-
-                <div class="step">
-                    <div class="step-number">3</div>
-                    <div class="step-content">
-                        <h3>Configure Your Kiosk</h3>
-                        <p>Select your WiFi network and set your startup command.</p>
-                    </div>
-                </div>
-            </div>
-
-            <div class="card">
-                <h2>Already on the Network?</h2>
-                <p style="font-size: 0.875rem; color: var(--muted); margin-bottom: 0.5rem;">Access the control panel at:</p>
-                <span class="highlight" id="hostname-url">http://ossuary.local:8081</span>
-            </div>
-
-            <div class="status">
-                <div class="pulse"></div>
-                <span>Waiting for configuration...</span>
             </div>
         </div>
 
-        <!-- Connected view - shown when WiFi is connected -->
+        <!-- Searching view: offline, saved networks are being tried -->
+        <div id="searching-view" style="display: none;">
+            <div class="card">
+                <h2>Connecting</h2>
+                <p style="font-size: clamp(0.7rem, 2.5vmin, 0.9rem); color: var(--muted);">
+                    Looking for a saved WiFi network. If none is found, the
+                    <b>Ossuary-Setup</b> network opens in a minute or two so you can choose one.
+                </p>
+            </div>
+        </div>
+
+        <!-- Connected view -->
         <div id="connected-view" style="display: none;">
             <div class="card" style="background: linear-gradient(135deg, #0d9488 0%, #0f766e 100%); color: white;">
                 <h2 style="color: rgba(255,255,255,0.9);">Connected</h2>
-                <div style="font-size: clamp(0.8rem, 3vmin, 1.1rem); font-weight: 500; margin-bottom: 0.5rem;">
-                    Network: <span id="connected-ssid" style="font-family: 'Space Mono', monospace;">—</span>
-                </div>
+                <div style="font-size: clamp(0.8rem, 3vmin, 1.1rem); font-weight: 500;" id="connected-label">—</div>
             </div>
-
             <div class="card">
-                <h2>Configure Your Display</h2>
-                <p style="font-size: clamp(0.7rem, 2.5vmin, 0.9rem); color: var(--muted); margin-bottom: 0.75rem;">
-                    Open the control panel to set what this kiosk displays:
+                <h2>Choose What to Display</h2>
+                <p style="font-size: clamp(0.7rem, 2.5vmin, 0.9rem); color: var(--muted); margin-bottom: 0.5rem;">
+                    On a phone or computer on the same network, open:
                 </p>
-                <span class="highlight" id="config-url" style="font-size: clamp(0.65rem, 2.2vmin, 0.85rem);">http://ossuary.local:8081</span>
-                <p id="config-url-fallback" style="font-size: clamp(0.55rem, 1.8vmin, 0.7rem); color: var(--muted); margin-top: 0.5rem; display: none;">
-                    Or use IP: <span class="highlight" id="config-ip" style="font-size: clamp(0.55rem, 1.8vmin, 0.7rem);"></span>
+                <span class="highlight" id="config-url">http://ossuary.local</span>
+                <p id="config-ip-row" style="font-size: clamp(0.55rem, 1.8vmin, 0.7rem); color: var(--muted); margin-top: 0.4rem; display: none;">
+                    or <span class="highlight" id="config-ip"></span>
                 </p>
-            </div>
-
-            <div class="status">
-                <div class="pulse" style="background: var(--teal);"></div>
-                <span>Waiting for display configuration...</span>
             </div>
         </div>
 
-        <div class="footer">
-            Powered by <a href="https://lumencanvas.com" target="_blank">LumenCanvas</a>
+        <div class="card" id="code-card" style="display: none;">
+            <h2>Setup Code</h2>
+            <div class="code" id="setup-code"></div>
+            <p style="font-size: clamp(0.55rem, 1.8vmin, 0.7rem); color: var(--muted); margin-top: 0.25rem;">Enter it when the control panel asks.</p>
         </div>
+
+        <div class="status">
+            <div class="pulse"></div>
+            <span id="status-line">Waiting for configuration...</span>
+        </div>
+
+        <div class="footer">Powered by LumenCanvas</div>
     </div>
 
     <script>
-        let lastWifiState = null;
-        let hasReloaded = sessionStorage.getItem('ossuary_reloaded') === 'true';
+        // The config server fills this in only for the kiosk's own browser
+        // (loopback, localhost Host header). Anywhere else it stays empty.
+        const SETUP_CODE = '__OSSUARY_SETUP_CODE__';
+        if (SETUP_CODE && !SETUP_CODE.startsWith('__')) {
+            document.getElementById('setup-code').textContent = SETUP_CODE;
+            document.getElementById('code-card').style.display = 'block';
+        }
 
-        // Check network status and toggle views
-        async function checkNetworkStatus() {
+        function show(view) {
+            for (const id of ['setup-view', 'searching-view', 'connected-view']) {
+                document.getElementById(id).style.display = id === view ? 'block' : 'none';
+            }
+        }
+
+        async function refresh() {
+            let s;
             try {
-                const response = await fetch('/api/status');
-                if (!response.ok) throw new Error('Status unavailable');
-                const data = await response.json();
-
-                if (data.wifi_connected && data.ssid) {
-                    // Also fetch system info for IP address
-                    let ip = null;
-                    try {
-                        const infoResp = await fetch('/api/system/info');
-                        if (infoResp.ok) {
-                            const info = await infoResp.json();
-                            ip = info.ip;
-                        }
-                    } catch (e) {}
-
-                    showConnectedView(data.ssid, data.hostname || 'ossuary', ip);
-                } else {
-                    showSetupView();
-                }
+                const r = await fetch('/api/status', { cache: 'no-store' });
+                if (!r.ok) throw new Error(r.status);
+                s = await r.json();
             } catch (e) {
-                // API not available or error - show setup view
-                showSetupView();
+                document.getElementById('status-line').textContent = 'Starting up...';
+                return;
             }
-        }
 
-        function showConnectedView(ssid, hostname, ip) {
-            document.getElementById('setup-view').style.display = 'none';
-            document.getElementById('connected-view').style.display = 'block';
-            document.getElementById('connected-ssid').textContent = ssid;
-            document.getElementById('config-url').textContent =
-                'http://' + hostname + '.local:8081';
-
-            // Show IP address as fallback if available
-            if (ip) {
-                document.getElementById('config-ip').textContent = 'http://' + ip + ':8081';
-                document.getElementById('config-url-fallback').style.display = 'block';
-            }
-        }
-
-        function showSetupView() {
-            document.getElementById('setup-view').style.display = 'block';
-            document.getElementById('connected-view').style.display = 'none';
-        }
-
-        // Check for startup command and reload when configured
-        async function checkStartupCommand() {
-            try {
-                const response = await fetch('/api/config');
-                if (!response.ok) return;
-                const data = await response.json();
-
-                if (data.startup_command && data.startup_command.trim() !== '' && !hasReloaded) {
-                    // Config set, reload once to let process manager show the right thing
-                    sessionStorage.setItem('ossuary_reloaded', 'true');
-                    location.reload();
+            if (s.connection === 'wifi' || s.connection === 'ethernet') {
+                show('connected-view');
+                document.getElementById('subtitle').textContent = 'Your kiosk is online';
+                document.getElementById('connected-label').textContent =
+                    s.connection === 'wifi' ? `WiFi: ${s.ssid}` : 'Ethernet';
+                document.getElementById('config-url').textContent = `http://${s.hostname}.local`;
+                if (s.ip) {
+                    document.getElementById('config-ip').textContent = `http://${s.ip}`;
+                    document.getElementById('config-ip-row').style.display = 'block';
                 }
-            } catch (e) {
-                // API not available, try again later
+                document.getElementById('status-line').textContent = 'Waiting for a display to be chosen...';
+            } else if (s.ap_mode) {
+                show('setup-view');
+                document.getElementById('subtitle').textContent = 'Let\'s get this kiosk online';
+                document.getElementById('status-line').textContent = 'Setup network is open';
+            } else {
+                show('searching-view');
+                document.getElementById('subtitle').textContent = 'Getting online';
+                document.getElementById('status-line').textContent = 'Searching for networks...';
             }
         }
 
-        // Initial checks
-        checkNetworkStatus();
-        checkStartupCommand();
-
-        // Poll for status updates
-        setInterval(checkNetworkStatus, 5000);
-        setInterval(checkStartupCommand, 5000);
-
-        // Try to get actual hostname for setup view
-        try {
-            const hostname = location.hostname || 'ossuary.local';
-            if (hostname && hostname !== '192.168.42.1') {
-                document.getElementById('hostname-url').textContent =
-                    'http://' + hostname + ':8081';
-            }
-        } catch(e) {}
+        refresh();
+        setInterval(refresh, 3000);
     </script>
 </body>
 </html>

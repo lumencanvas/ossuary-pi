@@ -62,9 +62,9 @@ bash /opt/ossuary/install.sh
 # === Image-specific system tweaks ===
 # (Not needed for interactive installs, only for pre-built images)
 
-# Disable standalone wpa_supplicant (NetworkManager manages WiFi)
-systemctl disable wpa_supplicant.service 2>/dev/null || true
-systemctl mask wpa_supplicant.service 2>/dev/null || true
+# NOTE: do NOT disable or mask wpa_supplicant.service. NetworkManager does
+# not replace it: NM drives WiFi through wpa_supplicant over D-Bus, and D-Bus
+# activates it through that very unit. Masking it leaves no working WiFi at all.
 
 # Enable NetworkManager (install.sh enables it but can't start it in chroot)
 systemctl enable NetworkManager.service 2>/dev/null || true

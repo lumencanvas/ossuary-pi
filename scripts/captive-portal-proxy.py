@@ -1,315 +1,182 @@
 #!/usr/bin/env python3
 """
-Captive Portal Detection Proxy
+Ossuary front door on port 80.
 
-This proxy sits on port 80 and handles captive portal detection requests from
-various platforms (iOS, Android, Windows, Firefox) by returning 302 redirects
-to trigger the captive portal detection. All other requests are proxied to
-WiFi Connect on port 8080.
+While the "Ossuary-Setup" hotspot is up (balena wifi-connect running):
+  * Operating-system captive-portal probes (Apple /hotspot-detect.html, Android
+    /generate_204, Windows /connecttest.txt, ...) and any request for a foreign
+    host get a 302 to http://192.168.42.1/. Answering a probe with anything but
+    the expected response is what makes phones pop the "sign in to network"
+    sheet. wifi-connect's dnsmasq resolves every name to the gateway, so all of
+    those requests land here.
+  * /networks and /connect go to wifi-connect. It owns the radio while the
+    hotspot is up: it scanned before raising the access point and is the only
+    thing that can join a network on the user's behalf.
+  * Everything else (the setup UI and its /api) goes to the Ossuary config
+    server, so the full setup, including the startup command, works from the
+    phone that joined the hotspot.
 
-IMPORTANT: To TRIGGER captive portal detection, we must return responses that
-DIFFER from what the device expects. Returning the "correct" response (204 for
-Android, "Success" for iOS) would make the device think internet is available
-and NOT show the captive portal.
+When the hotspot is down this simply forwards to the config server, so
+http://<hostname>.local/ works on the LAN as well as :8081.
 
-Strategy:
-- Return 302 redirect to "/" for all detection URLs
-- This triggers the captive portal UI on all platforms
-- The redirect destination shows the WiFi Connect setup UI
-
-Platform Detection URLs (all get 302 redirect):
-- Apple iOS/macOS: /hotspot-detect.html, /library/test/success.html
-- Android/Chrome: /generate_204, /gen_204
-- Windows: /connecttest.txt, /ncsi.txt, /redirect
-- Firefox: /canonical.html, /success.txt
+wifi-connect binds to the gateway address (192.168.42.1:8080), not loopback,
+and redirects any request whose Host header is not the gateway, so both the
+address and the Host header below matter.
 """
 
+import http.client
 import http.server
-import socketserver
-import urllib.request
-import urllib.error
-import sys
 import signal
 import socket
+import socketserver
+import sys
 import time
 
-# Configuration
 LISTEN_PORT = 80
-WIFI_CONNECT_PORT = 8080
-WIFI_CONNECT_HOST = 'localhost'
-REDIRECT_TARGET = '/'  # Redirect to root (WiFi Connect UI)
+PORTAL_GATEWAY = '192.168.42.1'   # wifi-connect default --portal-gateway
+WIFI_CONNECT = (PORTAL_GATEWAY, 8080)
+CONFIG_SERVER = ('127.0.0.1', 8081)
+PORTAL_URL = f'http://{PORTAL_GATEWAY}/'
 
-# Captive portal detection paths - all trigger redirect to portal UI
 PORTAL_DETECTION_PATHS = {
-    # Apple devices (iOS, macOS)
-    '/hotspot-detect.html',
-    '/library/test/success.html',
-    '/captive.apple.com',  # Sometimes just the path
-
-    # Android devices (Chrome, Samsung, etc.)
-    '/generate_204',
-    '/gen_204',
-    '/connectivitycheck.gstatic.com',
-    '/v2/detectNetwork',  # Some Android variants
-
-    # Windows devices
-    '/connecttest.txt',
-    '/ncsi.txt',
-    '/redirect',
-    '/fwlink',  # Windows NCSI alternate
-
-    # Firefox
-    '/canonical.html',
-    '/success.txt',
-
-    # Linux (NetworkManager/GNOME)
-    '/check_network_status.txt',
-    '/nm-check-status',
-
-    # Amazon Kindle
-    '/kindle-wifi/wifistub.html',
-
-    # Generic fallbacks
-    '/chat',  # Some captive portal detectors try this
-    '/portal',
+    '/hotspot-detect.html', '/library/test/success.html',            # Apple
+    '/generate_204', '/gen_204',                                      # Android / Chrome
+    '/connecttest.txt', '/ncsi.txt', '/redirect',                     # Windows
+    '/canonical.html', '/success.txt',                                # Firefox
+    '/check_network_status.txt', '/nm-check-status',                  # Linux
+    '/kindle-wifi/wifistub.html',                                     # Kindle
 }
+WIFI_CONNECT_PATHS = {'/networks', '/connect'}
+HOP_BY_HOP = {'connection', 'keep-alive', 'proxy-authenticate', 'proxy-authorization',
+              'te', 'trailers', 'transfer-encoding', 'upgrade', 'host', 'content-length',
+              'x-forwarded-for', 'x-forwarded-host'}
+
+_portal_cache = {'at': 0.0, 'up': False}
 
 
-class CaptivePortalProxyHandler(http.server.BaseHTTPRequestHandler):
-    """HTTP handler that intercepts captive portal detection and proxies other requests."""
+def portal_active():
+    """Is wifi-connect listening? Cached for 2s (called on every request)."""
+    now = time.monotonic()
+    if now - _portal_cache['at'] > 2:
+        try:
+            with socket.create_connection(WIFI_CONNECT, timeout=0.5):
+                _portal_cache['up'] = True
+        except OSError:
+            _portal_cache['up'] = False
+        _portal_cache['at'] = now
+    return _portal_cache['up']
 
-    # Increase timeout for slow connections
+
+def local_hostnames():
+    name = socket.gethostname().lower()
+    return {PORTAL_GATEWAY, name, f'{name}.local', 'localhost', '127.0.0.1'}
+
+
+class Handler(http.server.BaseHTTPRequestHandler):
+    protocol_version = 'HTTP/1.1'
     timeout = 30
+    MAX_BODY = 1024 * 1024
 
-    # Security limits
-    MAX_PATH_LENGTH = 2048
-    MAX_BODY_SIZE = 1024 * 1024  # 1MB max for POST bodies
+    def log_message(self, fmt, *args):
+        print(f'{self.client_address[0]} {fmt % args}', flush=True)
 
-    def log_message(self, format, *args):
-        """Custom logging format."""
-        print(f"[{self.log_date_time_string()}] {self.client_address[0]} - {format % args}")
+    def _redirect_to_portal(self):
+        self.send_response(302)
+        self.send_header('Location', PORTAL_URL)
+        self.send_header('Cache-Control', 'no-cache, no-store, must-revalidate')
+        self.send_header('Content-Length', '0')
+        self.end_headers()
 
-    def is_portal_detection_request(self, path):
-        """Check if this is a captive portal detection request."""
-        # Normalize path (remove query string) and convert to lowercase
-        clean_path = path.split('?')[0].lower()
-        return clean_path in PORTAL_DETECTION_PATHS
+    def _route(self):
+        path = self.path.split('?', 1)[0]
+        host = (self.headers.get('Host') or '').split(':', 1)[0].lower()
+        if portal_active():
+            if path.lower() in PORTAL_DETECTION_PATHS or (host and host not in local_hostnames()):
+                return 'redirect'
+            if path in WIFI_CONNECT_PATHS:
+                return 'wifi-connect'
+        return 'config'
 
-    def handle_portal_detection(self, path):
-        """
-        Return a 302 redirect to trigger captive portal detection.
-
-        All platforms detect captive portals by checking if they get
-        the expected response. By returning a redirect instead, we
-        signal that internet is NOT available and trigger the portal UI.
-        """
-        clean_path = path.split('?')[0].lower()
-
-        if clean_path not in PORTAL_DETECTION_PATHS:
-            return False
-
-        print(f"[PORTAL] Captive portal detection triggered: {clean_path} -> redirect to {REDIRECT_TARGET}")
-
-        # Send 302 redirect to the portal UI
-        # This triggers captive portal detection on all platforms
+    def _forward(self, target, body):
+        host, port = target
+        conn = http.client.HTTPConnection(host, port, timeout=40)
+        headers = {k: v for k, v in self.headers.items() if k.lower() not in HOP_BY_HOP}
+        headers['Host'] = f'{host}:{port}'
+        headers['X-Forwarded-For'] = self.client_address[0]
+        headers['X-Forwarded-Host'] = self.headers.get('Host', '')
+        headers['Connection'] = 'close'
+        if body is not None:
+            headers['Content-Length'] = str(len(body))
         try:
-            self.send_response(302)
-            self.send_header('Location', REDIRECT_TARGET)
-            self.send_header('Cache-Control', 'no-cache, no-store, must-revalidate')
-            self.send_header('Content-Length', '0')
-            self.end_headers()
-        except BrokenPipeError:
-            # Client disconnected, ignore
+            conn.request(self.command, self.path, body=body, headers=headers)
+            resp = conn.getresponse()
+            data = resp.read()
+        except OSError as e:
+            print(f'[ERROR] {self.command} {self.path} -> {host}:{port}: {e}', flush=True)
+            self.send_error(502, 'Service unavailable')
+            return
+        finally:
+            conn.close()
+
+        self.send_response(resp.status, resp.reason)
+        for k, v in resp.getheaders():
+            if k.lower() not in HOP_BY_HOP:
+                self.send_header(k, v)
+        self.send_header('Content-Length', str(len(data)))
+        self.end_headers()
+        if self.command != 'HEAD':
+            self.wfile.write(data)
+
+    def _handle(self):
+        if len(self.path) > 2048:
+            self.send_error(414)
+            return
+        body = None
+        if self.command in ('POST', 'PUT'):
+            try:
+                length = int(self.headers.get('Content-Length', 0))
+            except ValueError:
+                self.send_error(400)
+                return
+            if length < 0 or length > self.MAX_BODY:
+                self.send_error(413)
+                return
+            body = self.rfile.read(length)
+
+        route = self._route()
+        try:
+            if route == 'redirect':
+                self._redirect_to_portal()
+            elif route == 'wifi-connect':
+                self._forward(WIFI_CONNECT, body)
+            else:
+                self._forward(CONFIG_SERVER, body)
+        except (BrokenPipeError, ConnectionResetError):
             pass
 
-        return True
-
-    def proxy_request(self, method='GET', body=None):
-        """Proxy the request to WiFi Connect."""
-        target_url = f"http://{WIFI_CONNECT_HOST}:{WIFI_CONNECT_PORT}{self.path}"
-        print(f"[PROXY] {method} {self.path} -> {target_url}")
-
-        try:
-            # Build request
-            req = urllib.request.Request(target_url, method=method)
-
-            # Copy relevant headers
-            for header, value in self.headers.items():
-                if header.lower() not in ['host', 'connection', 'content-length']:
-                    req.add_header(header, value)
-
-            # Set host header for the target
-            req.add_header('Host', f'{WIFI_CONNECT_HOST}:{WIFI_CONNECT_PORT}')
-
-            # Add body for POST/PUT requests
-            if body:
-                req.data = body
-
-            # Send request to WiFi Connect
-            response = urllib.request.urlopen(req, timeout=30)
-
-            # Forward response back to client
-            self.send_response(response.getcode())
-
-            # Copy response headers
-            for header, value in response.headers.items():
-                if header.lower() not in ['connection', 'transfer-encoding', 'content-encoding']:
-                    self.send_header(header, value)
-            self.end_headers()
-
-            # Copy response body
-            self.wfile.write(response.read())
-
-        except urllib.error.HTTPError as e:
-            # Forward HTTP errors from WiFi Connect
-            self.send_response(e.code)
-            for header, value in e.headers.items():
-                if header.lower() not in ['connection', 'transfer-encoding']:
-                    self.send_header(header, value)
-            self.end_headers()
-            if e.fp:
-                self.wfile.write(e.fp.read())
-
-        except urllib.error.URLError as e:
-            # WiFi Connect not available
-            print(f"[ERROR] WiFi Connect not available: {e}")
-            self.send_error(502, f"WiFi Connect service unavailable")
-
-        except socket.timeout:
-            print(f"[ERROR] Timeout connecting to WiFi Connect")
-            self.send_error(504, "Gateway timeout")
-
-        except BrokenPipeError:
-            # Client disconnected mid-request, ignore
-            pass
-
-        except Exception as e:
-            print(f"[ERROR] Proxy error: {e}")
-            self.send_error(502, f"Proxy error")
-
-    def do_GET(self):
-        """Handle GET requests."""
-        # Validate path length
-        if len(self.path) > self.MAX_PATH_LENGTH:
-            self.send_error(414, "URI Too Long")
-            return
-
-        # Check for captive portal detection first
-        if self.is_portal_detection_request(self.path):
-            self.handle_portal_detection(self.path)
-            return
-
-        # Proxy everything else to WiFi Connect
-        self.proxy_request('GET')
-
-    def do_POST(self):
-        """Handle POST requests."""
-        # Validate path length
-        if len(self.path) > self.MAX_PATH_LENGTH:
-            self.send_error(414, "URI Too Long")
-            return
-
-        # Read request body with size limit
-        content_length = int(self.headers.get('Content-Length', 0))
-
-        if content_length > self.MAX_BODY_SIZE:
-            self.send_error(413, "Payload Too Large")
-            return
-
-        body = self.rfile.read(content_length) if content_length > 0 else None
-
-        # Proxy to WiFi Connect
-        self.proxy_request('POST', body)
-
-    def do_HEAD(self):
-        """Handle HEAD requests."""
-        if self.is_portal_detection_request(self.path):
-            # Return redirect headers (same as GET but no body)
-            self.handle_portal_detection(self.path)
-            return
-
-        self.proxy_request('HEAD')
-
-    def do_OPTIONS(self):
-        """Handle OPTIONS requests."""
-        self.proxy_request('OPTIONS')
+    do_GET = do_POST = do_HEAD = do_PUT = do_OPTIONS = _handle
 
 
-class ThreadedHTTPServer(socketserver.ThreadingMixIn, http.server.HTTPServer):
-    """Threaded HTTP server for handling concurrent requests."""
+class Server(socketserver.ThreadingMixIn, http.server.HTTPServer):
     allow_reuse_address = True
     daemon_threads = True
 
 
-def check_wifi_connect_available():
-    """Check if WiFi Connect is running on port 8080."""
-    sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-    sock.settimeout(1)
-    result = sock.connect_ex((WIFI_CONNECT_HOST, WIFI_CONNECT_PORT))
-    sock.close()
-    return result == 0
-
-
-def wait_for_wifi_connect(max_attempts=30, delay=2):
-    """Wait for WiFi Connect to become available."""
-    print(f"Waiting for WiFi Connect on port {WIFI_CONNECT_PORT}...")
-    for attempt in range(max_attempts):
-        if check_wifi_connect_available():
-            print(f"WiFi Connect is available on port {WIFI_CONNECT_PORT}")
-            return True
-        print(f"  Attempt {attempt + 1}/{max_attempts}: WiFi Connect not ready...")
-        time.sleep(delay)
-    print("WARNING: WiFi Connect not available, but starting proxy anyway")
-    return False
-
-
 def main():
-    print("=" * 60)
-    print("  Captive Portal Detection Proxy")
-    print("=" * 60)
-    print(f"  Listen port: {LISTEN_PORT}")
-    print(f"  WiFi Connect backend: {WIFI_CONNECT_HOST}:{WIFI_CONNECT_PORT}")
-    print(f"  Redirect target: {REDIRECT_TARGET}")
-    print("")
-    print("  Strategy: Return 302 redirects for detection URLs")
-    print("  This triggers captive portal UI on all platforms:")
-    print("    - Apple iOS/macOS (/hotspot-detect.html)")
-    print("    - Android/Chrome (/generate_204)")
-    print("    - Windows (/connecttest.txt)")
-    print("    - Firefox (/canonical.html)")
-    print("=" * 60)
-
-    # Wait for WiFi Connect to be available
-    wait_for_wifi_connect(max_attempts=15, delay=2)
-
-    # Create server
     try:
-        server = ThreadedHTTPServer(('', LISTEN_PORT), CaptivePortalProxyHandler)
-    except PermissionError:
-        print(f"ERROR: Cannot bind to port {LISTEN_PORT}. Run as root.")
-        sys.exit(1)
-    except Exception as e:
-        print(f"ERROR creating server: {e}")
+        server = Server(('', LISTEN_PORT), Handler)
+    except OSError as e:
+        print(f'ERROR: cannot listen on port {LISTEN_PORT}: {e}', flush=True)
         sys.exit(1)
 
-    # Handle shutdown signals gracefully
-    def shutdown_handler(signum, frame):
-        print(f"\nReceived signal {signum}, shutting down...")
-        server.shutdown()
+    def shutdown(signum, frame):
         sys.exit(0)
 
-    signal.signal(signal.SIGTERM, shutdown_handler)
-    signal.signal(signal.SIGINT, shutdown_handler)
-
-    # Start server
-    print(f"\nProxy server started on port {LISTEN_PORT}")
-    print("Waiting for connections...\n")
-
-    try:
-        server.serve_forever()
-    except Exception as e:
-        print(f"ERROR: {e}")
-        sys.exit(1)
+    signal.signal(signal.SIGTERM, shutdown)
+    signal.signal(signal.SIGINT, shutdown)
+    print(f'Ossuary front door on :{LISTEN_PORT} (portal {WIFI_CONNECT[0]}:{WIFI_CONNECT[1]}, '
+          f'config {CONFIG_SERVER[0]}:{CONFIG_SERVER[1]})', flush=True)
+    server.serve_forever()
 
 
 if __name__ == '__main__':

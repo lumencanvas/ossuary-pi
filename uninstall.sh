@@ -99,16 +99,19 @@ pkill -f wifi-connect 2>/dev/null || true
 # Step 2: Disable services
 log "Disabling services..."
 
-systemctl disable wifi-connect.service 2>/dev/null || true
-systemctl disable ossuary-startup.service 2>/dev/null || true
-systemctl disable ossuary-web.service 2>/dev/null || true
+OSSUARY_UNITS="wifi-connect wifi-connect-manager captive-portal-proxy ossuary-startup ossuary-web ossuary-connection-monitor"
+for unit in $OSSUARY_UNITS; do
+    systemctl disable --now "$unit.service" 2>/dev/null || true
+done
 
 # Step 3: Remove service files
 log "Removing service files..."
 
-rm -f /etc/systemd/system/wifi-connect.service
-rm -f /etc/systemd/system/ossuary-startup.service
-rm -f /etc/systemd/system/ossuary-web.service
+for unit in $OSSUARY_UNITS; do
+    rm -f "/etc/systemd/system/$unit.service"
+done
+rm -f /etc/logrotate.d/ossuary
+rm -f /boot/firmware/ossuary-setup-code.txt
 
 # Reload systemd
 systemctl daemon-reload

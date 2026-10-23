@@ -183,9 +183,20 @@ install_wifi_connect() {
 
     # Download WiFi Connect
     log "Downloading from: $DOWNLOAD_URL"
-    if ! wget --progress=bar:force "$DOWNLOAD_URL" -O wifi-connect.tar.gz 2>&1 | tee -a "$LOG_FILE"; then
-        log "Download failed - wget exit code: $?"
-        error "Failed to download WiFi Connect (check network connection)"
+    # No pipe here: piping wget into tee would report tee's exit status and
+    # hide a failed download.
+    local attempt
+    for attempt in 1 2 3; do
+        if wget -q --tries=2 --timeout=30 "$DOWNLOAD_URL" -O wifi-connect.tar.gz >> "$LOG_FILE" 2>&1 \
+            && gzip -t wifi-connect.tar.gz 2>/dev/null; then
+            break
+        fi
+        log "Download attempt $attempt failed"
+        rm -f wifi-connect.tar.gz
+        sleep 5
+    done
+    if [ ! -s wifi-connect.tar.gz ]; then
+        error "Failed to download WiFi Connect from $DOWNLOAD_URL (check network connection)"
     fi
     log "Download complete"
 
@@ -243,59 +254,20 @@ update_components() {
         success "Custom UI updated"
     fi
 
-    # Copy scripts
-    if [ -f "$REPO_DIR/scripts/process-manager.sh" ]; then
-        cp "$REPO_DIR/scripts/process-manager.sh" "$INSTALL_DIR/"
-        chmod +x "$INSTALL_DIR/process-manager.sh"
-        success "Process manager script installed"
-    else
-        error "Process manager script not found!"
-    fi
-
-    if [ -f "$REPO_DIR/scripts/wifi-connect-manager.sh" ]; then
-        cp "$REPO_DIR/scripts/wifi-connect-manager.sh" "$INSTALL_DIR/scripts/"
-        chmod +x "$INSTALL_DIR/scripts/wifi-connect-manager.sh"
-        success "WiFi Connect manager script installed"
-    else
-        error "WiFi Connect manager script not found!"
-    fi
-
-    if [ -f "$REPO_DIR/scripts/ensure-network-persistence.sh" ]; then
-        cp "$REPO_DIR/scripts/ensure-network-persistence.sh" "$INSTALL_DIR/scripts/"
-        chmod +x "$INSTALL_DIR/scripts/ensure-network-persistence.sh"
-        success "Network persistence script installed"
-
-        # Run it immediately to ensure existing networks are configured
-        log "Configuring network persistence..."
-        "$INSTALL_DIR/scripts/ensure-network-persistence.sh" >> "$LOG_FILE" 2>&1 || true
-    fi
-
-    # Install config server
-    if [ -f "$REPO_DIR/scripts/config-server.py" ]; then
-        cp "$REPO_DIR/scripts/config-server.py" "$INSTALL_DIR/scripts/"
-        chmod +x "$INSTALL_DIR/scripts/config-server.py"
-        success "Config server installed"
-    else
-        error "Config server script not found!"
-    fi
-
-    # Install captive portal proxy for proper platform detection
-    if [ -f "$REPO_DIR/scripts/captive-portal-proxy.py" ]; then
-        cp "$REPO_DIR/scripts/captive-portal-proxy.py" "$INSTALL_DIR/scripts/"
-        chmod +x "$INSTALL_DIR/scripts/captive-portal-proxy.py"
-        success "Captive portal proxy installed"
-    fi
-
-    # Install connection monitor script
-    if [ -f "$REPO_DIR/scripts/connection-monitor.sh" ]; then
-        cp "$REPO_DIR/scripts/connection-monitor.sh" "$INSTALL_DIR/scripts/"
-        chmod +x "$INSTALL_DIR/scripts/connection-monitor.sh"
-        success "Connection monitor script installed"
-    else
-        warning "Connection monitor script not found (optional)"
-    fi
-
+    # Copy every script (shell daemons, Python servers, shared helpers)
+    local required
+    for required in process-manager.sh wifi-connect-manager.sh config-server.py ossuary-lib.sh; do
+        [ -f "$REPO_DIR/scripts/$required" ] || error "Missing scripts/$required in $REPO_DIR"
+    done
+    cp "$REPO_DIR/scripts/"*.sh "$REPO_DIR/scripts/"*.py "$INSTALL_DIR/scripts/"
+    chmod +x "$INSTALL_DIR/scripts/"*.sh "$INSTALL_DIR/scripts/"*.py
+    # The service file runs $INSTALL_DIR/process-manager.sh; older versions
+    # installed a copy there, which would now be stale.
+    ln -sf "$INSTALL_DIR/scripts/process-manager.sh" "$INSTALL_DIR/process-manager.sh"
     success "Scripts updated"
+
+    log "Configuring network persistence..."
+    "$INSTALL_DIR/scripts/ensure-network-persistence.sh" >> "$LOG_FILE" 2>&1 || true
 }
 
 # Update systemd services
@@ -326,12 +298,14 @@ Environment="DBUS_SYSTEM_BUS_ADDRESS=unix:path=/run/dbus/system_bus_socket"
 # Not enabled by default - managed by wifi-connect-manager
 EOF
 
-    # Captive Portal Proxy - handles platform-specific detection on port 80
+    # Port 80 front door: captive-portal detection while the hotspot is up,
+    # otherwise a plain proxy to the config server.
+    # NOTE: no Wants=wifi-connect.service here. This unit is enabled at boot,
+    # so that would raise the setup hotspot on every boot.
     cat > /etc/systemd/system/captive-portal-proxy.service << EOF
 [Unit]
-Description=Captive Portal Detection Proxy
-After=NetworkManager.service wifi-connect.service
-Wants=wifi-connect.service
+Description=Ossuary port 80 (captive portal detection + config UI)
+After=network.target
 
 [Service]
 Type=simple
@@ -352,8 +326,10 @@ EOF
     cat > /etc/systemd/system/ossuary-startup.service << EOF
 [Unit]
 Description=Ossuary Process Manager - Keeps User Command Running
+# Not ordered after network-online: the welcome page and offline/LAN kiosks
+# must not wait for the internet. process-manager.sh waits briefly by itself.
 After=multi-user.target NetworkManager.service ossuary-web.service
-Wants=network-online.target ossuary-web.service
+Wants=ossuary-web.service
 StartLimitIntervalSec=300
 StartLimitBurst=10
 
@@ -390,6 +366,7 @@ Type=simple
 ExecStart=$INSTALL_DIR/scripts/wifi-connect-manager.sh
 Restart=always
 RestartSec=10
+TimeoutStopSec=30
 User=root
 
 # Logging
@@ -405,8 +382,9 @@ EOF
     cat > /etc/systemd/system/ossuary-web.service << EOF
 [Unit]
 Description=Ossuary Web Configuration Interface
-After=network-online.target wifi-connect-manager.service
-Wants=network-online.target
+# Listens on all addresses, so it needs no network to start; the welcome page
+# depends on it being up quickly even when offline.
+After=network.target
 Wants=wifi-connect-manager.service
 
 [Service]
@@ -430,8 +408,7 @@ EOF
 [Unit]
 Description=Ossuary Connection Monitor
 Documentation=https://github.com/lumencanvas/ossuary-pi
-After=network-online.target ossuary-startup.service
-Wants=network-online.target
+After=network.target ossuary-startup.service
 
 [Service]
 Type=simple
@@ -471,7 +448,10 @@ perform_installation() {
             echo "  Installing required packages..."
             # Note: network-manager is pre-installed in Pi OS Bookworm/Trixie
             # But we include it to be safe for older versions
-            apt-get install -y curl wget jq network-manager python3 python3-pip >> "$LOG_FILE" 2>&1
+            # dnsmasq-base: the dnsmasq binary wifi-connect runs for the hotspot's
+            # DHCP and DNS. NOT the full "dnsmasq" package, whose system service
+            # would hold port 53 and break the hotspot.
+            apt-get install -y curl wget jq network-manager dnsmasq-base iw rfkill python3 >> "$LOG_FILE" 2>&1
 
             # NetworkManager is default in Pi OS Bookworm (2023) and Trixie (2025)
             # But we'll ensure it's enabled
@@ -545,8 +525,7 @@ perform_installation() {
         log "Creating default configuration..."
         cat > "$CONFIG_DIR/config.json" << EOF
 {
-  "startup_command": "",
-  "wifi_networks": []
+  "startup_command": ""
 }
 EOF
     fi
@@ -555,11 +534,17 @@ EOF
 
     # Step 5b: Configure log rotation
     log "Configuring log rotation..."
+    # copytruncate: the kiosk keeps its log open, so a renamed file would keep
+    # receiving writes. Most daemons now log to the journal; the extra names
+    # cover files left by older versions.
     cat > /etc/logrotate.d/ossuary << 'LOGROTATE_EOF'
-/var/log/ossuary-*.log {
+/var/log/ossuary-process.log /var/log/ossuary-connection.log /var/log/wifi-connect-manager.log {
     weekly
     rotate 4
+    maxsize 5M
     compress
+    delaycompress
+    copytruncate
     missingok
     notifempty
 }
@@ -583,7 +568,15 @@ LOGROTATE_EOF
     cp "$REPO_DIR/uninstall.sh" "$INSTALL_DIR/" 2>/dev/null || true
     chmod +x "$INSTALL_DIR/uninstall.sh" 2>/dev/null || true
 
+    # A system-wide dnsmasq service holds port 53 and stops the hotspot's own
+    # dnsmasq from starting.
+    if systemctl is-enabled --quiet dnsmasq.service 2>/dev/null; then
+        warning "The dnsmasq service is enabled; it conflicts with the setup hotspot. Disable it with: sudo systemctl disable --now dnsmasq"
+    fi
+
     # Skip service restarts and verification in image build mode (no systemd in chroot)
+    # The setup code is NOT generated here: every card flashed from the image
+    # would share it. The config server creates one on each device's first boot.
     if [ "$OSSUARY_IMAGE_BUILD" = "1" ]; then
         log "Image build mode: skipping service restarts (services will start on first boot)"
         return 0
@@ -640,6 +633,18 @@ LOGROTATE_EOF
         success "All components verified successfully!"
     else
         warning "$issues component(s) may need attention"
+    fi
+
+    # The config server creates the setup code on its first start.
+    local i
+    for i in $(seq 1 10); do
+        [ -s "$CONFIG_DIR/setup-code" ] && break
+        sleep 1
+    done
+    if [ -s "$CONFIG_DIR/setup-code" ]; then
+        echo ""
+        echo -e "  Setup code for the control panel: ${GREEN}$(cat "$CONFIG_DIR/setup-code")${NC}"
+        echo "  (also shown on the kiosk's screen, and in $CONFIG_DIR/setup-code)"
     fi
 
     # Return 0 even if there are issues (non-fatal)

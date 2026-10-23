@@ -28,7 +28,7 @@
 - **First-run welcome page** — Shows setup instructions on the Pi's display until configured
 - **LumenCanvas first-class support** — WebGPU enabled, kiosk optimized, refresh behaviors built-in
 - **Captive portal configuration** — Configure WiFi and startup commands from any device
-- **Always-accessible control panel** — Web UI available at `hostname.local:8081` when connected
+- **Always-accessible control panel** — Web UI at `http://hostname.local` (or `:8081`) when connected, protected by a per-device setup code
 - **Connection-aware behaviors** — Auto-refresh on reconnection, scheduled refreshes, connection monitoring
 - **Process management** — Keeps your kiosk app running with automatic restart on crash
 - **Chromium kiosk mode** — Pre-configured flags for password-store, crash recovery, and error suppression
@@ -117,19 +117,23 @@ Download the latest release:
 3. **Wait 1-2 minutes** for first boot to complete
 
 **What you'll see:**
-- The Pi boots and shows a welcome page with setup instructions
+- The Pi boots and shows a welcome page with setup instructions and its **setup code**
 - If you configured WiFi in Pi Imager, it will connect automatically
-- The control panel becomes available at `http://your-hostname.local:8081`
+- The control panel becomes available at `http://your-hostname.local`
 
 ### Step 4: Access the Control Panel
 
 Once booted, open a browser on any device connected to the same network:
 
 ```
-http://ossuary.local:8081
+http://ossuary.local
 ```
 
-(Replace `ossuary` with your chosen hostname)
+(Replace `ossuary` with your chosen hostname. Port `8081` also works.)
+
+The control panel asks for the **setup code** shown on the kiosk's screen. It is
+also in `ossuary-setup-code.txt` on the SD card's boot partition, and in
+`/etc/ossuary/setup-code` over SSH. Every device generates its own on first boot.
 
 From the control panel you can:
 - Select a preset (LumenCanvas, Web Kiosk, Custom)
@@ -145,7 +149,13 @@ If you didn't set up WiFi in Pi Imager, or need to change networks:
 2. Connect your phone/laptop to this network
 3. A captive portal opens (or visit `http://192.168.42.1`)
 4. Select your WiFi network and enter the password
-5. The Pi connects and your kiosk starts
+5. The hotspot closes while the Pi joins your network. The kiosk's screen then shows
+   its address; if the password was wrong, "Ossuary-Setup" comes back within a minute
+
+A Pi connected by **ethernet** never opens the setup hotspot.
+
+> SSH is **off** in the pre-built image (its default login, `pi` / `ossuary`, is public).
+> Enable it with your own username and password in Pi Imager's OS customisation.
 
 ---
 
@@ -232,8 +242,9 @@ The installer will:
 ### Step 5: Configure Your Kiosk
 
 After reboot, access the control panel:
-- **URL**: `http://your-hostname.local:8081`
-- **Example**: `http://ossuary-kiosk.local:8081`
+- **URL**: `http://your-hostname.local` (or port `8081`)
+- **Example**: `http://ossuary-kiosk.local`
+- **Setup code**: printed at the end of the installer, shown on the kiosk's screen, and in `/etc/ossuary/setup-code`
 
 <p align="center">
   <img src="screenshots/display-tab.png" alt="Display Configuration" width="500">
@@ -262,7 +273,7 @@ Select a preset or enter a custom command:
 1. On boot, Ossuary tries to connect to saved WiFi networks
 2. If connected: runs your startup command (Chromium kiosk, script, etc.)
 3. If disconnected: broadcasts "Ossuary-Setup" AP for reconfiguration
-4. Control panel always available at `http://hostname.local:8081`
+4. Control panel always available at `http://hostname.local` (setup code required)
 
 ### Connection Events
 
@@ -281,7 +292,11 @@ When configured, Ossuary can:
   <img src="screenshots/wifi-tab.png" alt="WiFi Tab" width="500">
 </p>
 
-Access at `http://your-pi-hostname.local:8081` when connected to the same network.
+Access at `http://your-pi-hostname.local` when connected to the same network, and enter the setup code.
+
+**LumenCanvas:** choose *Pair with a code* and the kiosk opens LumenCanvas's pairing
+screen. In LumenCanvas, open **Remote Projectors** and enter the code it shows to send
+any project to this display. Or choose *Specific projector* and paste a projector link.
 
 **Features:**
 - View system status and network info
@@ -329,9 +344,9 @@ Stored at `/etc/ossuary/config.json`:
 
 ```json
 {
-  "startup_command": "chromium --kiosk https://lumencanvas.studio/canvas/abc123",
+  "startup_command": "chromium --kiosk \"https://lumencanvas.studio/remote\"",
   "saved_networks": [
-    {"ssid": "MyNetwork", "password": "..."}
+    {"ssid": "MyNetwork", "notes": "Gallery office"}
   ],
   "behaviors": {
     "on_connection_lost": {"action": "show_overlay"},
@@ -418,7 +433,7 @@ The process manager automatically:
 - Adds `--password-store=basic` to prevent keyring prompts
 - Adds `--disable-session-crashed-bubble` to prevent restore prompts
 
-If issues persist, check: `/home/pi/.config/chromium/Default/Preferences`
+If issues persist, check the kiosk profile: `~/.config/chromium-kiosk/Default/Preferences` (in the desktop user's home)
 
 ---
 

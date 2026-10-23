@@ -1,480 +1,242 @@
 #!/bin/bash
 
 # Ossuary Connection Monitor
-# Monitors network connectivity and triggers actions on connection events
-# Also handles time-based schedule rules
+# Watches the network and reacts to connection changes (by default: reload the
+# kiosk page when the connection comes back), runs the periodic refresh, and
+# executes time-based schedule rules.
+#
+# Signals: HUP = reload the configuration.
 
 CONFIG_FILE="/etc/ossuary/config.json"
-LOG_FILE="/var/log/ossuary-connection.log"
 STATE_FILE="/run/ossuary/connection-state"
-# Schedule state persists across reboots (unlike /run which is tmpfs)
-SCHEDULE_STATE_FILE="/var/lib/ossuary/schedule-last-check"
-CHROMIUM_DEBUG_PORT=9222
+SCHEDULE_STATE_FILE="/var/lib/ossuary/schedule-state.json"
+SCRIPT_DIR="$(cd "$(dirname "$(readlink -f "${BASH_SOURCE[0]}")")" && pwd)"
+CHECK_INTERVAL=5
 
-# Ensure directories exist
-mkdir -p "$(dirname "$LOG_FILE")"
-mkdir -p "$(dirname "$STATE_FILE")"
-mkdir -p "$(dirname "$SCHEDULE_STATE_FILE")"
-# Set permissions for persistent schedule state
-chmod 755 "$(dirname "$SCHEDULE_STATE_FILE")" 2>/dev/null || true
+# shellcheck source=ossuary-lib.sh
+. "$SCRIPT_DIR/ossuary-lib.sh" 2>/dev/null || . /opt/ossuary/scripts/ossuary-lib.sh
 
-# Initialize state
-LAST_STATE="unknown"
-DISCONNECTED_SINCE=0
-
-# Cached config values (reloaded on SIGHUP)
-CACHED_BEHAVIOR_LOST=""
-CACHED_BEHAVIOR_REGAINED=""
-CACHED_REFRESH_INTERVAL=0
-CONFIG_LOADED=false
-
-reload_config() {
-    if [ -f "$CONFIG_FILE" ]; then
-        local result
-        result=$(python3 -c "
-import json
-try:
-    with open('$CONFIG_FILE', 'r') as f:
-        config = json.load(f)
-    behaviors = config.get('behaviors', {})
-    lost = behaviors.get('on_connection_lost', {})
-    regained = behaviors.get('on_connection_regained', {})
-    refresh = behaviors.get('scheduled_refresh', {})
-    print(lost.get('action', '') if isinstance(lost, dict) else '')
-    print(regained.get('action', '') if isinstance(regained, dict) else '')
-    if isinstance(refresh, dict) and refresh.get('enabled', False):
-        print(refresh.get('interval_minutes', 60))
-    else:
-        print(0)
-except:
-    print('')
-    print('')
-    print(0)
-" 2>/dev/null)
-        CACHED_BEHAVIOR_LOST=$(echo "$result" | sed -n '1p')
-        CACHED_BEHAVIOR_REGAINED=$(echo "$result" | sed -n '2p')
-        CACHED_REFRESH_INTERVAL=$(echo "$result" | sed -n '3p')
-        CONFIG_LOADED=true
-        log "Config loaded: lost=$CACHED_BEHAVIOR_LOST regained=$CACHED_BEHAVIOR_REGAINED refresh=${CACHED_REFRESH_INTERVAL}m"
-    fi
-}
+mkdir -p "$(dirname "$STATE_FILE")" "$(dirname "$SCHEDULE_STATE_FILE")"
 
 log() {
-    echo "[$(date '+%Y-%m-%d %H:%M:%S')] $1" | tee -a "$LOG_FILE"
+    # stdout goes to the journal (journalctl -u ossuary-connection-monitor)
+    echo "$1"
 }
 
-# Check if connected to the network
-# Checks LAN/gateway first (fast, works on intranets), then optionally verifies
-# external internet. A kiosk on an intranet with no outside internet is still "connected."
-check_connection() {
-    # Step 1: Check if we have a network gateway (fastest, works on any LAN/intranet)
-    local gateway
-    gateway=$(ip route 2>/dev/null | grep default | awk '{print $3}' | head -1)
-    if [ -z "$gateway" ]; then
-        # No default route at all — definitely not connected
-        echo "disconnected"
-        return
-    fi
+BEHAVIOR_LOST=""
+BEHAVIOR_REGAINED=""
+REGAINED_DELAY=3
+REFRESH_INTERVAL=0
 
-    # Step 2: Ping the gateway — confirms the local network link is up
-    if ping -c 1 -W 1 "$gateway" &>/dev/null; then
-        echo "connected"
-        return
-    fi
-
-    # Step 3: Gateway didn't respond to ping (some routers block ICMP).
-    # Try an ARP lookup — if gateway is in the ARP table, layer 2 is working.
-    if ip neigh show "$gateway" 2>/dev/null | grep -qv "FAILED"; then
-        echo "connected"
-        return
-    fi
-
-    # Step 4: Last resort — try external endpoints in case gateway blocks ping/ARP
-    # but forwards traffic (unusual but possible with strict firewall rules)
-    if curl -s --max-time 2 -o /dev/null -w "%{http_code}" http://detectportal.firefox.com/canonical.html 2>/dev/null | grep -q "200"; then
-        echo "connected"
-        return
-    fi
-    if ping -c 1 -W 2 8.8.8.8 &>/dev/null; then
-        echo "connected"
-        return
-    fi
-
-    echo "disconnected"
-}
-
-# Get behavior settings from cached config
-get_behavior() {
-    local key="$1"
-    [ "$CONFIG_LOADED" != "true" ] && reload_config
-    case "$key" in
-        "on_connection_lost") echo "$CACHED_BEHAVIOR_LOST" ;;
-        "on_connection_regained") echo "$CACHED_BEHAVIOR_REGAINED" ;;
-        *) echo "" ;;
-    esac
-}
-
-# Get refresh interval from cached config
-get_refresh_interval() {
-    [ "$CONFIG_LOADED" != "true" ] && reload_config
-    echo "${CACHED_REFRESH_INTERVAL:-0}"
-}
-
-# Check and execute schedule rules
-# Returns the action to execute if a rule matches, empty otherwise
-check_schedule_rules() {
-    if [ ! -f "$CONFIG_FILE" ]; then
-        return
-    fi
-
-    python3 -c "
-import json
-from datetime import datetime
-
-try:
-    with open('$CONFIG_FILE', 'r') as f:
-        config = json.load(f)
-
-    schedule = config.get('schedule', {})
-    if not schedule.get('enabled', False):
-        exit(0)
-
-    rules = schedule.get('rules', [])
-    if not rules:
-        exit(0)
-
-    now = datetime.now()
-    current_time = now.strftime('%H:%M')
-    current_hour_min = now.hour * 60 + now.minute
-
-    # Map day names to datetime weekday (0=Monday, 6=Sunday)
-    day_map = {'mon': 0, 'tue': 1, 'wed': 2, 'thu': 3, 'fri': 4, 'sat': 5, 'sun': 6}
-    current_day = now.weekday()
-
-    # Read last check state to avoid re-triggering
-    last_check = {}
-    try:
-        with open('$SCHEDULE_STATE_FILE', 'r') as f:
-            last_check = json.load(f)
-    except:
-        pass
-
-    for rule in rules:
-        if not rule.get('enabled', True):
-            continue
-
-        rule_id = rule.get('id', '')
-        trigger = rule.get('trigger', {})
-
-        if trigger.get('type') != 'time':
-            continue
-
-        trigger_time = trigger.get('time', '')
-        trigger_days = trigger.get('days', [])
-
-        if not trigger_time or not trigger_days:
-            continue
-
-        # Check if today is in the trigger days
-        current_day_name = ['mon', 'tue', 'wed', 'thu', 'fri', 'sat', 'sun'][current_day]
-        if current_day_name not in trigger_days:
-            continue
-
-        # Check if current time matches trigger time (within 1 minute window)
-        try:
-            t_hour, t_min = map(int, trigger_time.split(':'))
-            trigger_mins = t_hour * 60 + t_min
-            if abs(current_hour_min - trigger_mins) > 1:
-                continue
-        except:
-            continue
-
-        # Check if we already triggered this rule in this minute
-        last_trigger_key = f'{rule_id}_{current_time}'
-        if last_check.get('last_trigger') == last_trigger_key:
-            continue
-
-        # Rule matches! Save state and output action
-        last_check['last_trigger'] = last_trigger_key
-        with open('$SCHEDULE_STATE_FILE', 'w') as f:
-            json.dump(last_check, f)
-
-        action = rule.get('action', {})
-        action_type = action.get('type', 'refresh')
-        profile = action.get('profile', '')
-
-        print(f'{action_type}:{profile}')
-        break  # Only execute one rule per check
-
-except Exception as e:
-    pass
-" 2>/dev/null
-}
-
-# Execute a schedule action
-execute_schedule_action() {
-    local action="$1"
-    local action_type="${action%%:*}"
-    local profile="${action#*:}"
-
-    log "Executing schedule action: $action_type (profile: $profile)"
-
-    case "$action_type" in
-        "refresh")
-            refresh_chromium
-            ;;
-        "restart")
-            send_hup_to_process_manager
-            ;;
-        "switch_profile")
-            # For now, just log - full profile switching requires startup command change
-            log "Profile switch requested: $profile (not fully implemented)"
-            # Could implement by updating config and signaling process manager
-            ;;
-        *)
-            log "Unknown schedule action: $action_type"
-            ;;
-    esac
-}
-
-# Send SIGHUP to process manager safely
-send_hup_to_process_manager() {
-    local pid_file="/run/ossuary/process.pid"
-    if [ -f "$pid_file" ]; then
-        local pid
-        pid=$(cat "$pid_file" 2>/dev/null)
-        if [ -n "$pid" ] && kill -0 "$pid" 2>/dev/null; then
-            kill -HUP "$pid" 2>/dev/null
-            return 0
-        fi
-    fi
-    return 1
-}
-
-# Send refresh command to Chromium via Chrome DevTools Protocol
-# This works on both X11 and Wayland (unlike xdotool which only works on X11)
-refresh_chromium() {
-    log "Attempting to refresh Chromium page..."
-
-    # Method 1: Try Chrome DevTools Protocol (works on both X11 and Wayland)
-    if pgrep -f "chromium.*remote-debugging-port" &>/dev/null; then
-        local debug_url="http://localhost:$CHROMIUM_DEBUG_PORT/json"
-        local pages=$(curl -s --max-time 2 "$debug_url" 2>/dev/null)
-
-        if [ -n "$pages" ]; then
-            # Get the page ID for sending commands
-            local page_id=$(echo "$pages" | python3 -c "
+reload_config() {
+    local result
+    # Defaults match config-server.py DEFAULT_CONFIG; a config.json written by
+    # the installer has no "behaviors" block at all.
+    result=$(python3 - "$CONFIG_FILE" <<'PY' 2>/dev/null
 import json, sys
 try:
-    pages = json.load(sys.stdin)
-    for page in pages:
-        if page.get('type') == 'page':
-            print(page.get('id', ''))
-            break
-except:
-    pass
-" 2>/dev/null)
+    config = json.load(open(sys.argv[1]))
+except Exception:
+    config = {}
+b = config.get('behaviors') or {}
+lost = b.get('on_connection_lost') or {}
+regained = b.get('on_connection_regained') or {}
+refresh = b.get('scheduled_refresh') or {}
+print(lost.get('action', 'show_overlay'))
+print(regained.get('action', 'refresh_page'))
+print(int(regained.get('delay_seconds', 3) or 0))
+print(int(refresh.get('interval_minutes', 60) or 0) if refresh.get('enabled') else 0)
+PY
+)
+    BEHAVIOR_LOST=$(sed -n 1p <<< "$result")
+    BEHAVIOR_REGAINED=$(sed -n 2p <<< "$result")
+    REGAINED_DELAY=$(sed -n 3p <<< "$result")
+    REFRESH_INTERVAL=$(sed -n 4p <<< "$result")
+    [[ "$REGAINED_DELAY" =~ ^[0-9]+$ ]] || REGAINED_DELAY=3
+    [[ "$REFRESH_INTERVAL" =~ ^[0-9]+$ ]] || REFRESH_INTERVAL=0
+    log "Config: on lost=${BEHAVIOR_LOST:-none}, on regained=${BEHAVIOR_REGAINED:-none}, periodic refresh=${REFRESH_INTERVAL}m"
+}
 
-            if [ -n "$page_id" ]; then
-                # Send Page.reload via HTTP endpoint (simpler than websocket)
-                local reload_result=$(curl -s --max-time 5 \
-                    "http://localhost:$CHROMIUM_DEBUG_PORT/json/activate/$page_id" 2>/dev/null)
+check_connection() {
+    if ossuary_has_lan; then echo connected; else echo disconnected; fi
+}
 
-                # Use Python to send the actual reload command via websocket
-                # Pass pages via stdin to avoid triple-quote breakage from page titles/URLs
-                echo "$pages" | python3 -c "
-import json
-import socket
-import sys
+send_hup_to_process_manager() {
+    local pid
+    pid=$(cat /run/ossuary/process.pid 2>/dev/null)
+    [ -n "$pid" ] && kill -0 "$pid" 2>/dev/null && kill -HUP "$pid" 2>/dev/null
+}
 
-# Simple websocket to send CDP command
-def send_cdp_command(ws_url, method, params=None):
-    try:
-        # Parse ws:// URL
-        if ws_url.startswith('ws://'):
-            host_port = ws_url[5:].split('/')[0]
-            path = '/' + '/'.join(ws_url[5:].split('/')[1:])
-            host, port = host_port.split(':') if ':' in host_port else (host_port, 80)
-            port = int(port)
-
-            # Create socket and send websocket upgrade
-            sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-            sock.settimeout(3)
-            sock.connect((host, port))
-
-            # Websocket handshake
-            import hashlib, base64, os
-            key = base64.b64encode(os.urandom(16)).decode()
-            handshake = f'GET {path} HTTP/1.1\r\nHost: {host}:{port}\r\nUpgrade: websocket\r\nConnection: Upgrade\r\nSec-WebSocket-Key: {key}\r\nSec-WebSocket-Version: 13\r\n\r\n'
-            sock.send(handshake.encode())
-            response = sock.recv(1024)
-
-            if b'101' in response:
-                # Send reload command
-                cmd = json.dumps({'id': 1, 'method': method, 'params': params or {}})
-                frame = bytearray([0x81, len(cmd)]) + cmd.encode()
-                sock.send(bytes(frame))
-                sock.close()
-                return True
-    except:
-        pass
-    return False
-
-# Read pages from stdin
-pages = json.load(sys.stdin)
-for page in pages:
-    if page.get('type') == 'page':
-        ws_url = page.get('webSocketDebuggerUrl', '')
-        if ws_url:
-            if send_cdp_command(ws_url, 'Page.reload', {'ignoreCache': True}):
-                print('reloaded')
-                break
-" 2>/dev/null
-
-                if [ $? -eq 0 ]; then
-                    log "Page reload sent via Chrome DevTools Protocol"
-                    return 0
-                fi
-            fi
-        fi
-    fi
-
-    # Method 2: Fallback - signal process manager to restart browser
-    log "CDP refresh failed, falling back to process restart"
-    if send_hup_to_process_manager; then
-        log "Sent HUP signal to process manager"
+# Reload the page in place through DevTools; restart the browser if that fails.
+refresh_chromium() {
+    local out
+    if out=$(python3 "$SCRIPT_DIR/cdp-reload.py" 2>&1); then
+        log "Page reloaded ($out)"
         return 0
     fi
-
-    log "Could not refresh page"
-    return 1
+    log "In-place reload failed ($out); restarting the browser"
+    send_hup_to_process_manager || log "Could not restart the browser: process manager not running"
 }
 
-# Handle connection lost
-on_connection_lost() {
-    log "Connection lost!"
-    echo "disconnected" > "$STATE_FILE"
-    DISCONNECTED_SINCE=$(date +%s)
+# Switch to a saved display profile (each preset saves its command).
+switch_profile() {
+    local profile="$1" result
+    result=$(python3 - "$CONFIG_FILE" "$profile" <<'PY' 2>&1
+import json, os, sys
+path, name = sys.argv[1], sys.argv[2]
+config = json.load(open(path))
+command = ((config.get('profiles') or {}).get(name) or {}).get('command', '').strip()
+if not command:
+    print(f'profile "{name}" has no saved command')
+    sys.exit(1)
+if config.get('startup_command') == command:
+    print('already active')
+    sys.exit(0)
+config['startup_command'] = command
+config['active_profile'] = name
+tmp = path + '.tmp'
+with open(tmp, 'w') as f:
+    json.dump(config, f, indent=2)
+    f.flush()
+    os.fsync(f.fileno())
+os.chmod(tmp, 0o600)
+os.rename(tmp, path)
+print('switched')
+PY
+)
+    local status=$?
+    log "Switch to profile '$profile': $result"
+    [ $status -eq 0 ] && [ "$result" = "switched" ] && send_hup_to_process_manager
+}
 
-    local action=$(get_behavior "on_connection_lost")
-    log "Connection lost action: $action"
+# Print "action:profile" for each schedule rule due now. Each rule fires once
+# per day per trigger time: the state file remembers the last firing. A rule is
+# due from its trigger minute until 5 minutes later, so a missed tick (slow
+# boot, clock step) still fires it once.
+due_schedule_actions() {
+    python3 - "$CONFIG_FILE" "$SCHEDULE_STATE_FILE" <<'PY' 2>/dev/null
+import json, os, sys
+from datetime import datetime
+config_path, state_path = sys.argv[1], sys.argv[2]
+try:
+    schedule = (json.load(open(config_path)).get('schedule') or {})
+except Exception:
+    sys.exit(0)
+if not schedule.get('enabled'):
+    sys.exit(0)
+try:
+    fired = json.load(open(state_path))
+except Exception:
+    fired = {}
+now = datetime.now()
+today = now.strftime('%Y-%m-%d')
+day = ['mon', 'tue', 'wed', 'thu', 'fri', 'sat', 'sun'][now.weekday()]
+minute_now = now.hour * 60 + now.minute
+changed = False
+for rule in schedule.get('rules') or []:
+    if not isinstance(rule, dict) or rule.get('enabled') is False:
+        continue
+    trigger = rule.get('trigger') or {}
+    if trigger.get('type', 'time') != 'time' or day not in (trigger.get('days') or []):
+        continue
+    try:
+        h, m = map(int, str(trigger.get('time', '')).split(':'))
+    except ValueError:
+        continue
+    late = minute_now - (h * 60 + m)
+    if not 0 <= late < 5:
+        continue
+    key = f"{today} {h:02d}:{m:02d}"
+    rule_id = str(rule.get('id') or rule.get('name') or f'{h}:{m}')
+    if fired.get(rule_id) == key:
+        continue
+    fired[rule_id] = key
+    changed = True
+    action = rule.get('action') or {}
+    print(f"{action.get('type', 'refresh')}:{action.get('profile', '')}")
+if changed:
+    tmp = state_path + '.tmp'
+    with open(tmp, 'w') as f:
+        json.dump(fired, f)
+    os.rename(tmp, state_path)
+PY
+}
 
-    case "$action" in
-        "show_overlay")
-            # Could inject an overlay via JavaScript if using remote debugging
-            log "Would show overlay (not implemented yet)"
-            ;;
-        "pause")
-            log "Pausing - waiting for reconnection"
-            ;;
-        "refresh")
-            # Will refresh when connection returns
-            ;;
-        *)
-            log "No action configured for connection lost"
-            ;;
+execute_schedule_action() {
+    local action_type="${1%%:*}" profile="${1#*:}"
+    log "Schedule: $action_type${profile:+ ($profile)}"
+    case "$action_type" in
+        refresh) refresh_chromium ;;
+        restart) send_hup_to_process_manager ;;
+        switch_profile) switch_profile "$profile" ;;
+        *) log "Unknown schedule action: $action_type" ;;
     esac
 }
 
-# Handle connection regained
+on_connection_lost() {
+    log "Connection lost"
+    echo disconnected > "$STATE_FILE"
+}
+
 on_connection_regained() {
-    log "Connection regained!"
-    echo "connected" > "$STATE_FILE"
-
-    local action=$(get_behavior "on_connection_regained")
-    log "Connection regained action: $action"
-
-    case "$action" in
-        "refresh_page"|"refresh")
-            # Wait a moment for network to stabilize
-            sleep 3
+    log "Connection regained (action: ${BEHAVIOR_REGAINED:-none})"
+    echo connected > "$STATE_FILE"
+    case "$BEHAVIOR_REGAINED" in
+        refresh_page|refresh)
+            sleep "$REGAINED_DELAY"
             refresh_chromium
             ;;
-        "restart")
-            log "Restarting process..."
+        restart)
             send_hup_to_process_manager
             ;;
-        "continue"|"")
-            log "Continuing without action"
-            ;;
-        *)
-            log "Unknown action: $action"
-            ;;
     esac
-
-    DISCONNECTED_SINCE=0
 }
 
-# Main monitoring loop
-main() {
-    log "==================================="
-    log "Connection Monitor started"
-    log "==================================="
+trap 'log "Stopping"; exit 0' TERM INT
+trap 'reload_config' HUP
 
-    # Load config at startup (reloaded on SIGHUP)
+main() {
+    log "Connection monitor started"
     reload_config
 
-    local current_state
-    local check_interval=5
-    local last_refresh_time=$(date +%s)
-
-    # Load initial state
-    if [ -f "$STATE_FILE" ]; then
-        LAST_STATE=$(cat "$STATE_FILE")
-    fi
+    local last_state current last_refresh=$SECONDS clock_warned=0
+    # Start from "unknown": the first observation is not treated as a change,
+    # so booting offline doesn't count as "lost", nor booting online as "regained".
+    last_state=unknown
 
     while true; do
-        current_state=$(check_connection)
-
-        # State change detection
-        if [ "$current_state" != "$LAST_STATE" ]; then
-            if [ "$current_state" = "disconnected" ]; then
+        current=$(check_connection)
+        if [ "$last_state" != unknown ] && [ "$current" != "$last_state" ]; then
+            if [ "$current" = disconnected ]; then
                 on_connection_lost
-            elif [ "$current_state" = "connected" ] && [ "$LAST_STATE" = "disconnected" ]; then
+            else
                 on_connection_regained
             fi
-            LAST_STATE="$current_state"
+        fi
+        last_state="$current"
+
+        if [ "$current" = connected ] && [ "${REFRESH_INTERVAL:-0}" -gt 0 ] \
+            && [ $((SECONDS - last_refresh)) -ge $((REFRESH_INTERVAL * 60)) ]; then
+            log "Periodic refresh (every ${REFRESH_INTERVAL} minutes)"
+            refresh_chromium
+            last_refresh=$SECONDS
         fi
 
-        # Scheduled refresh check (only when connected)
-        if [ "$current_state" = "connected" ]; then
-            local interval_mins
-            interval_mins=$(get_refresh_interval)
-            # Validate interval is a positive integer
-            if [ -n "$interval_mins" ] && [ "$interval_mins" -eq "$interval_mins" ] 2>/dev/null && [ "$interval_mins" -gt 0 ]; then
-                local interval_secs=$((interval_mins * 60))
-                local now=$(date +%s)
-                local elapsed=$((now - last_refresh_time))
-
-                if [ $elapsed -ge $interval_secs ]; then
-                    log "Scheduled refresh triggered (every ${interval_mins} minutes)"
-                    refresh_chromium
-                    last_refresh_time=$now
-                fi
-            fi
-
-            # Check time-based schedule rules (only when connected and clock is synced)
-            local schedule_action=""
-            local ntp_synced
-            ntp_synced=$(timedatectl show -p NTPSynchronized --value 2>/dev/null)
-            if [ "$ntp_synced" != "yes" ]; then
-                # Clock not synced — skip schedule rules to avoid wrong-time execution
-                schedule_action=""
-            else
-                schedule_action=$(check_schedule_rules)
-            fi
-            if [ -n "$schedule_action" ]; then
-                execute_schedule_action "$schedule_action"
-            fi
+        # Time-based rules need a trustworthy clock. A Pi without an RTC battery
+        # boots with the time it last saved until NTP syncs.
+        if [ "$(timedatectl show -p NTPSynchronized --value 2>/dev/null)" = yes ]; then
+            clock_warned=0
+            local action
+            while IFS= read -r action; do
+                [ -n "$action" ] && execute_schedule_action "$action"
+            done < <(due_schedule_actions)
+        elif [ "$clock_warned" = 0 ]; then
+            log "Clock not synchronised yet: schedule rules paused until it is"
+            clock_warned=1
         fi
 
-        sleep $check_interval
+        sleep "$CHECK_INTERVAL"
     done
 }
 
-# Signal handlers
-trap 'log "Received TERM signal, stopping..."; exit 0' TERM INT
-trap 'log "Received HUP signal, reloading config..."; reload_config' HUP
-
-# Run main
 main
