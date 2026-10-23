@@ -9,9 +9,8 @@ While the "Ossuary-Setup" hotspot is up (balena wifi-connect running):
     the expected response is what makes phones pop the "sign in to network"
     sheet. wifi-connect's dnsmasq resolves every name to the gateway, so all of
     those requests land here.
-  * /networks and /connect go to wifi-connect. It owns the radio while the
-    hotspot is up: it scanned before raising the access point and is the only
-    thing that can join a network on the user's behalf.
+  * /networks goes to wifi-connect: it scanned before raising the access
+    point, and the radio can't scan while it is one.
   * Everything else (the setup UI and its /api) goes to the Ossuary config
     server, so the full setup, including the startup command, works from the
     phone that joined the hotspot.
@@ -46,7 +45,10 @@ PORTAL_DETECTION_PATHS = {
     '/check_network_status.txt', '/nm-check-status',                  # Linux
     '/kindle-wifi/wifistub.html',                                     # Kindle
 }
-WIFI_CONNECT_PATHS = {'/networks', '/connect'}
+# Only the scan comes from wifi-connect (it scanned before raising the access
+# point). Joining a network (/connect) is handled by the config server, which
+# gives the join longer than wifi-connect's ~15 s.
+WIFI_CONNECT_PATHS = {'/networks'}
 HOP_BY_HOP = {'connection', 'keep-alive', 'proxy-authenticate', 'proxy-authorization',
               'te', 'trailers', 'transfer-encoding', 'upgrade', 'host', 'content-length',
               'x-forwarded-for', 'x-forwarded-host'}

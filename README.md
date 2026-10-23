@@ -150,7 +150,7 @@ If you didn't set up WiFi in Pi Imager, or need to change networks:
 3. A captive portal opens (or visit `http://192.168.42.1`)
 4. Select your WiFi network and enter the password
 5. The hotspot closes while the Pi joins your network. The kiosk's screen then shows
-   its address; if the password was wrong, "Ossuary-Setup" comes back within a minute
+   its address; if it could not join, "Ossuary-Setup" comes back within about two minutes
 
 A Pi connected by **ethernet** never opens the setup hotspot.
 

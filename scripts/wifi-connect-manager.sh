@@ -17,7 +17,8 @@
 CHECK_INTERVAL=10
 BOOT_GRACE=90       # at boot, how long saved networks get to auto-connect
 LOST_GRACE=120      # after losing a connection (router reboot), before opening the hotspot
-RETRY_WINDOW=45     # after the portal times out, how long saved networks get
+RETRY_WINDOW=60     # after the portal closes, how long saved networks get
+PENDING_WIFI_FILE=/run/ossuary/pending-wifi  # network just chosen in the portal (config-server.py)
 
 log() {
     # stdout goes to the journal (journalctl -u wifi-connect-manager)
@@ -108,6 +109,22 @@ kick_saved_networks() {
     nmcli device connect "$iface" >/dev/null 2>&1 || true
 }
 
+# A network chosen through the portal that never connected (wrong password,
+# out of range) is removed, so it doesn't shadow the next attempt.
+resolve_pending_join() {
+    [ -f "$PENDING_WIFI_FILE" ] || return 0
+    local uuid ssid
+    uuid=$(sed -n 1p "$PENDING_WIFI_FILE")
+    ssid=$(sed -n 2p "$PENDING_WIFI_FILE")
+    if is_online; then
+        log "Joined '$ssid' from the setup portal"
+    elif [ "$(nmcli -g connection.timestamp connection show "$uuid" 2>/dev/null)" = "0" ]; then
+        log "Could not join '$ssid' (wrong password or out of range); removing it and reopening the hotspot"
+        nmcli connection delete "$uuid" >/dev/null 2>&1 || true
+    fi
+    rm -f "$PENDING_WIFI_FILE"
+}
+
 STATE=""
 set_state() {
     if [ "$1" != "$STATE" ]; then
@@ -144,6 +161,7 @@ main() {
         if is_online; then
             # Ethernet plugged in, or a network joined: the hotspot must go.
             stop_portal
+            resolve_pending_join
             set_state online
             sleep "$CHECK_INTERVAL"
             continue
@@ -178,6 +196,7 @@ main() {
                     kick_saved_networks
                     wait_online "$RETRY_WINDOW" && continue
                 fi
+                resolve_pending_join
                 ;;
         esac
 

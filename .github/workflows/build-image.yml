@@ -78,6 +78,11 @@ jobs:
           hostname: ossuary
           username: pi
           password: ossuary
+          # Without this, pi-gen leaves the first-boot "rename user" flow pending:
+          # LightDM then logs in "rpi-first-boot-wizard" instead of pi, and on
+          # this image (no piwiz) the screen stays on the wallpaper forever.
+          # Pi Imager's OS customisation still renames the user when asked.
+          disable-first-boot-user-rename: 1
           locale: en_US.UTF-8
           keyboard-keymap: us
           keyboard-layout: English (US)

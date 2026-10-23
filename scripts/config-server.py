@@ -45,6 +45,8 @@ BOOT_CODE_FILE = "/boot/firmware/ossuary-setup-code.txt"
 UI_DIR = "/opt/ossuary/custom-ui"
 SCRIPTS_DIR = "/opt/ossuary/scripts"
 PROCESS_PID_FILE = "/run/ossuary/process.pid"
+PENDING_WIFI_FILE = "/run/ossuary/pending-wifi"  # read by wifi-connect-manager.sh
+HOTSPOT_PREFIX = "192.168.42."                     # wifi-connect's default portal subnet
 CODE_HEADER = "X-Ossuary-Code"
 CODE_ALPHABET = "ABCDEFGHJKMNPQRSTUVWXYZ23456789"  # no 0/O, 1/I/L
 
@@ -495,12 +497,22 @@ class ConfigHandler(SimpleHTTPRequestHandler):
             return
         return super().do_HEAD()
 
+    def from_setup_hotspot(self):
+        """A phone on the open Ossuary-Setup hotspot, while the hotspot is up."""
+        if not self.client_ip().startswith(HOTSPOT_PREFIX):
+            return False
+        return subprocess.run(['systemctl', 'is-active', '--quiet', 'wifi-connect'], timeout=3).returncode == 0
+
     def do_POST(self):
         path = urlparse(self.path).path
         handler = self.POST_ROUTES.get(path)
         if not handler:
             return self.send_json_response({'error': 'Not found'}, 404)
-        if not self.authorized():
+        # Choosing the WiFi network from the setup hotspot needs no code, like
+        # wifi-connect's own portal: the hotspot only exists while the kiosk
+        # is offline, and the person setting it up may not have the code yet.
+        hotspot_join = path == '/connect' and self.from_setup_hotspot()
+        if not hotspot_join and not self.authorized():
             return
         data, error_sent = self.read_json_body()
         if error_sent:
@@ -927,6 +939,36 @@ class ConfigHandler(SimpleHTTPRequestHandler):
             networks.append({'ssid': ssid, 'notes': meta.get('notes', ''), 'missing': True})
         self.send_json_response({'saved_networks': networks})
 
+    def _join_from_hotspot(self, ssid, password):
+        existing = [c for c in nm_wifi_connections() if c[3] != 'ap' and c[2] == ssid]
+        common = ['connection.autoconnect', 'yes', 'connection.autoconnect-priority', '50']
+        security = ['wifi-sec.key-mgmt', 'wpa-psk', 'wifi-sec.psk', password] if password else []
+        if existing:
+            uuid = existing[0][0]
+            args = ['nmcli', 'connection', 'modify', uuid] + common
+            if password:
+                args += security
+            else:
+                args += ['remove', '802-11-wireless-security']
+            r = subprocess.run(args, capture_output=True, text=True, timeout=15)
+        else:
+            r = subprocess.run(['nmcli', '-t', 'connection', 'add', 'type', 'wifi', 'con-name', ssid,
+                                'ssid', ssid] + common + security, capture_output=True, text=True, timeout=15)
+            m = re.search(r'\(([0-9a-f-]{36})\)', r.stdout)
+            uuid = m.group(1) if m else ''
+        if r.returncode != 0 or not uuid:
+            return self.send_json_response({'error': r.stderr.strip() or 'Could not save the network'}, 400)
+        os.makedirs(os.path.dirname(PENDING_WIFI_FILE), exist_ok=True)
+        with open(PENDING_WIFI_FILE, 'w') as f:
+            f.write(f"{uuid}\n{ssid}\n")
+        self._remember_network(ssid)
+        self.send_json_response({'success': True, 'message': f'Joining {ssid}'})
+
+        def close_hotspot():
+            time.sleep(2)  # let the reply reach the phone first
+            subprocess.run(['systemctl', 'stop', 'wifi-connect'], capture_output=True, timeout=60)
+        threading.Thread(target=close_hotspot, daemon=True).start()
+
     def _remember_network(self, ssid, notes=None, connected=False):
         def mutate(config):
             networks = config.setdefault('saved_networks', [])
@@ -1024,11 +1066,25 @@ class ConfigHandler(SimpleHTTPRequestHandler):
         self.send_json_response(self._scan(rescan))
 
     def handle_wifi_connect(self, data):
-        """wifi-connect compatible /connect, for switching networks from the LAN."""
+        """wifi-connect compatible /connect.
+
+        From the setup hotspot: save the network as a NetworkManager profile,
+        answer the phone, then close the hotspot so NetworkManager can join it.
+        wifi-connect's own /connect gives up after ~15 s and deletes the
+        profile, which is too short once the radio has to leave AP mode; here
+        wifi-connect-manager.sh gives the join a full minute, and removes the
+        profile only if it never connected (wrong password).
+
+        From the LAN: switch networks directly.
+        """
         ssid = (data.get('ssid') or '').strip()
         password = data.get('passphrase') or data.get('password') or ''
         if not ssid:
             return self.send_json_response({'error': 'SSID required'}, 400)
+        if password and not (8 <= len(password) <= 63):
+            return self.send_json_response({'error': 'WiFi passwords are 8 to 63 characters'}, 400)
+        if self.from_setup_hotspot():
+            return self._join_from_hotspot(ssid, password)
         match = [c for c in nm_wifi_connections() if c[3] != 'ap' and c[2] == ssid]
         if match:
             if password:

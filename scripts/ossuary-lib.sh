@@ -9,10 +9,11 @@
 OSSUARY_CONFIG_FILE="${OSSUARY_CONFIG_FILE:-/etc/ossuary/config.json}"
 
 # Print the kiosk user's name.
-# Order: explicit "kiosk_user" in config.json > LightDM autologin user >
-# the uid 1000 account > the first regular account.
+# Order: explicit "kiosk_user" in config.json > the regular user that owns the
+# graphical session on screen right now > LightDM autologin user > the uid 1000
+# account > the first regular account.
 ossuary_kiosk_user() {
-    local user=""
+    local user="" sock uid
 
     if [ -f "$OSSUARY_CONFIG_FILE" ]; then
         user=$(python3 -c '
@@ -22,6 +23,20 @@ try:
 except Exception:
     pass
 ' "$OSSUARY_CONFIG_FILE" 2>/dev/null)
+    fi
+
+    # Whoever is actually logged in on the display wins over configuration:
+    # launching into anyone else's session fails ("Failed to connect to Wayland
+    # display") and leaves the screen empty.
+    if [ -z "$user" ]; then
+        for sock in /run/user/*/wayland-[0-9]; do
+            [ -S "$sock" ] || continue
+            uid=$(stat -c %u "$sock" 2>/dev/null) || continue
+            if [ "$uid" -ge 1000 ] && [ "$uid" -lt 65534 ]; then
+                user=$(getent passwd "$uid" | cut -d: -f1)
+                [ -n "$user" ] && break
+            fi
+        done
     fi
 
     if [ -z "$user" ]; then

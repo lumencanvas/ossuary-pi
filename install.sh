@@ -328,7 +328,11 @@ EOF
 Description=Ossuary Process Manager - Keeps User Command Running
 # Not ordered after network-online: the welcome page and offline/LAN kiosks
 # must not wait for the internet. process-manager.sh waits briefly by itself.
-After=multi-user.target NetworkManager.service ossuary-web.service
+# NOT After=multi-user.target: this unit is WantedBy=multi-user.target, and
+# the connection monitor is ordered after it, so that formed an ordering cycle
+# and systemd silently dropped ossuary-connection-monitor at every boot (no
+# reconnect refresh, no schedules). The process manager waits for the display.
+After=NetworkManager.service ossuary-web.service systemd-user-sessions.service
 Wants=ossuary-web.service
 StartLimitIntervalSec=300
 StartLimitBurst=10
