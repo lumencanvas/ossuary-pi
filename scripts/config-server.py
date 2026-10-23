@@ -477,6 +477,7 @@ class ConfigHandler(SimpleHTTPRequestHandler):
         '/api/process/status': 'handle_get_process_status',
         '/api/auth/check': 'handle_auth_check',
         '/api/wifi-country': 'handle_get_wifi_country',
+        '/api/hostname': 'handle_get_hostname',
         '/startup': 'handle_get_startup',
         '/networks': 'handle_get_nearby_networks_compat',
     }
@@ -500,6 +501,7 @@ class ConfigHandler(SimpleHTTPRequestHandler):
         '/api/profiles/activate': 'handle_set_active_profile',
         '/api/display/power': 'handle_set_display_power',
         '/api/wifi-country': 'handle_set_wifi_country',
+        '/api/hostname': 'handle_set_hostname',
         '/connect': 'handle_wifi_connect',
     }
 
@@ -752,6 +754,46 @@ class ConfigHandler(SimpleHTTPRequestHandler):
             'config_url': f"http://{hostname}.local:8081",
             'config_url_ip': f"http://{ip}:8081" if ip else None,
         })
+
+    def handle_get_hostname(self):
+        self.send_json_response({'hostname': socket.gethostname()})
+
+    def handle_set_hostname(self, data):
+        """Rename the device. Takes effect now (and for .local) without a reboot."""
+        name = str(data.get('hostname', '')).strip().lower()
+        if not re.fullmatch(r'[a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?', name):
+            return self.send_json_response(
+                {'error': 'Use 1-63 letters, numbers or hyphens, not starting or ending with a hyphen'}, 400)
+        old = socket.gethostname()
+        if name == old:
+            return self.send_json_response({'success': True, 'hostname': name, 'changed': False})
+        r = subprocess.run(['hostnamectl', 'set-hostname', name], capture_output=True, text=True, timeout=15)
+        if r.returncode != 0:
+            return self.send_json_response({'error': r.stderr.strip() or 'Could not set hostname'}, 400)
+        # Keep sudo and local lookups resolving the new name.
+        try:
+            with open('/etc/hosts') as f:
+                lines = f.read().splitlines()
+            out, found = [], False
+            for line in lines:
+                if line.startswith('127.0.1.1'):
+                    out.append(f'127.0.1.1\t{name}')
+                    found = True
+                else:
+                    out.append(line)
+            if not found:
+                out.append(f'127.0.1.1\t{name}')
+            tmp = '/etc/hosts.ossuary-tmp'
+            with open(tmp, 'w') as f:
+                f.write('\n'.join(out) + '\n')
+            os.chmod(tmp, 0o644)
+            os.replace(tmp, '/etc/hosts')
+        except OSError as e:
+            print(f'[hostname] /etc/hosts not updated: {e}')
+        # Announce the new .local name right away.
+        subprocess.run(['systemctl', 'try-restart', 'avahi-daemon'], capture_output=True, timeout=15)
+        self.send_json_response({'success': True, 'hostname': name, 'changed': True,
+                                 'config_url': f'http://{name}.local:8081'})
 
     # ---------------------------------------------------------------- process
 

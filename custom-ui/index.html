@@ -597,6 +597,16 @@
             </div>
 
             <div class="info-box" style="margin-top: var(--space-md);">
+                <h3>Device Name</h3>
+                <p style="margin-bottom: var(--space-sm);">The hostname. The control panel moves to <code id="hostname-url">http://ossuary.local</code>.</p>
+                <div style="display: flex; gap: var(--space-sm);">
+                    <input type="text" id="hostname-input" maxlength="63" placeholder="e.g. lobby-projector" autocapitalize="off" spellcheck="false" style="text-transform: lowercase; flex: 1;">
+                    <button class="btn-small" style="padding: 0 var(--space-lg);" onclick="saveHostname()">Rename</button>
+                </div>
+                <p class="hint" id="hostname-hint">Letters, numbers and hyphens.</p>
+            </div>
+
+            <div class="info-box" style="margin-top: var(--space-md);">
                 <h3>Page Refresh</h3>
                 <p style="margin-bottom: var(--space-sm);">Refresh the browser page without restarting the process.</p>
                 <button class="btn-small" onclick="refreshPage()">Refresh Page</button>
@@ -1002,7 +1012,7 @@
             if (tab === 'networks') { loadSavedNetworks(); loadWifiCountry(); }
             if (tab === 'schedule') { loadSchedule(); loadTimezone(); }
             if (tab === 'display') loadCurrentConfig();
-            if (tab === 'control') loadProcessStatus();
+            if (tab === 'control') { loadProcessStatus(); loadHostname(); }
             if (tab === 'logs') loadLogs();
         }
 
@@ -1146,6 +1156,29 @@
                     ? 'Sets the radio\'s legal channels. Needed for 5 GHz networks.'
                     : 'Not set: only 2.4 GHz networks may work. Enter your two-letter country code.';
             } catch (e) {}
+        }
+
+        async function loadHostname() {
+            try {
+                const data = await apiJson('/api/hostname');
+                document.getElementById('hostname-input').value = data.hostname || '';
+                document.getElementById('hostname-url').textContent = `http://${data.hostname}.local`;
+            } catch (e) {}
+        }
+
+        async function saveHostname() {
+            const hostname = document.getElementById('hostname-input').value.trim().toLowerCase();
+            const hint = document.getElementById('hostname-hint');
+            try {
+                const data = await apiJson('/api/hostname', { method: 'POST', body: { hostname } });
+                systemHostname = data.hostname;
+                document.getElementById('hostname-url').textContent = `http://${data.hostname}.local`;
+                hint.textContent = data.changed
+                    ? `Renamed. Use http://${data.hostname}.local from now on.`
+                    : 'That is already the name.';
+            } catch (e) {
+                hint.textContent = e.message;
+            }
         }
 
         async function saveWifiCountry() {

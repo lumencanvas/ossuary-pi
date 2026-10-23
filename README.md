@@ -29,6 +29,7 @@
 - **LumenCanvas first-class support** — WebGPU enabled, kiosk optimized, refresh behaviors built-in
 - **Captive portal configuration** — Configure WiFi and startup commands from any device
 - **Always-accessible control panel** — Web UI at `http://hostname.local` (or `:8081`) when connected, protected by a per-device setup code
+- **Rename the device** — Change the hostname (and its `.local` address) from the Control tab, no reboot
 - **Connection-aware behaviors** — Auto-refresh on reconnection, scheduled refreshes, connection monitoring
 - **Process management** — Keeps your kiosk app running with automatic restart on crash
 - **Chromium kiosk mode** — Pre-configured flags for password-store, crash recovery, and error suppression
@@ -62,6 +63,16 @@ sudo ./install.sh
 The installer will configure everything and reboot. After reboot, access the control panel at `http://your-pi-hostname.local:8081`.
 
 ---
+
+## Updating an Existing Device
+
+SSH in and re-run the installer from the latest code. It keeps your config, saved networks and setup code, and over SSH it updates in place without a reboot:
+
+```bash
+git clone https://github.com/lumencanvas/ossuary-pi.git   # or: cd ossuary-pi && git pull
+cd ossuary-pi
+sudo ./install.sh
+```
 
 ## Pre-Built Image Setup
 
