@@ -101,7 +101,8 @@ class Handler(http.server.BaseHTTPRequestHandler):
 
     def _forward(self, target, body):
         host, port = target
-        conn = http.client.HTTPConnection(host, port, timeout=40)
+        # Longer than the config server's slowest call (joining a network, 45 s).
+        conn = http.client.HTTPConnection(host, port, timeout=60)
         headers = {k: v for k, v in self.headers.items() if k.lower() not in HOP_BY_HOP}
         headers['Host'] = f'{host}:{port}'
         headers['X-Forwarded-For'] = self.client_address[0]

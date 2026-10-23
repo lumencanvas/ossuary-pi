@@ -18,6 +18,7 @@ CHECK_INTERVAL=10
 BOOT_GRACE=90       # at boot, how long saved networks get to auto-connect
 LOST_GRACE=120      # after losing a connection (router reboot), before opening the hotspot
 RETRY_WINDOW=60     # after the portal closes, how long saved networks get
+PORTAL_RETRY=300    # with saved networks, recheck them this often while nobody uses the hotspot
 PENDING_WIFI_FILE=/run/ossuary/pending-wifi  # network just chosen in the portal (config-server.py)
 
 log() {
@@ -76,7 +77,17 @@ portal_running() {
     [ "$s" = "active" ] || [ "$s" = "activating" ]
 }
 
+PORTAL_SINCE=$SECONDS
+
+# Any phone/laptop currently associated with the hotspot?
+hotspot_has_clients() {
+    local iface
+    iface=$(wifi_iface)
+    [ -n "$iface" ] && [ -n "$(iw dev "$iface" station dump 2>/dev/null)" ]
+}
+
 start_portal() {
+    PORTAL_SINCE=$SECONDS
     ensure_radio
     log "Starting the Ossuary-Setup hotspot"
     systemctl start wifi-connect || log "ERROR: wifi-connect failed to start (journalctl -u wifi-connect)"
@@ -116,11 +127,18 @@ resolve_pending_join() {
     local uuid ssid
     uuid=$(sed -n 1p "$PENDING_WIFI_FILE")
     ssid=$(sed -n 2p "$PENDING_WIFI_FILE")
-    if is_online; then
-        log "Joined '$ssid' from the setup portal"
-    elif [ "$(nmcli -g connection.timestamp connection show "$uuid" 2>/dev/null)" = "0" ]; then
-        log "Could not join '$ssid' (wrong password or out of range); removing it and reopening the hotspot"
+    # timestamp 0 = this profile has never been connected. That also covers
+    # coming back online through a DIFFERENT profile (e.g. the original saved
+    # one): the portal entry was not what worked, so it goes.
+    if [ "$(nmcli -g connection.timestamp connection show "$uuid" 2>/dev/null)" = "0" ]; then
+        if is_online; then
+            log "Back online, but not through '$ssid' as entered in the setup portal; removing that entry"
+        else
+            log "Could not join '$ssid' (wrong password or out of range); removing it and reopening the hotspot"
+        fi
         nmcli connection delete "$uuid" >/dev/null 2>&1 || true
+    elif is_online; then
+        log "Joined '$ssid' from the setup portal"
     fi
     rm -f "$PENDING_WIFI_FILE"
 }
@@ -175,6 +193,16 @@ main() {
 
         if portal_running; then
             set_state portal
+            # One radio can't watch for saved networks while it is an access
+            # point, and wifi-connect's idle timeout never fires once anyone
+            # has opened the setup page. So when the venue's network may be
+            # back (saved networks exist) and nobody is on the hotspot, close
+            # it now and then to look.
+            if [ $((SECONDS - PORTAL_SINCE)) -ge "$PORTAL_RETRY" ] && has_saved_wifi && ! hotspot_has_clients; then
+                log "Hotspot idle for $((SECONDS - PORTAL_SINCE))s; checking saved networks again"
+                stop_portal
+                PORTAL_SINCE=$SECONDS
+            fi
             sleep "$CHECK_INTERVAL"
             continue
         fi

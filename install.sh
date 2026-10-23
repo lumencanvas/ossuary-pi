@@ -349,6 +349,9 @@ RestartSec=10
 TimeoutStartSec=180
 RuntimeDirectory=ossuary
 RuntimeDirectoryMode=0755
+# Other daemons keep state here too (pending WiFi join, connection state):
+# don't delete it whenever the kiosk is stopped or restarted.
+RuntimeDirectoryPreserve=yes
 
 # Logging
 StandardOutput=journal
@@ -572,10 +575,27 @@ LOGROTATE_EOF
     cp "$REPO_DIR/uninstall.sh" "$INSTALL_DIR/" 2>/dev/null || true
     chmod +x "$INSTALL_DIR/uninstall.sh" 2>/dev/null || true
 
-    # A system-wide dnsmasq service holds port 53 and stops the hotspot's own
-    # dnsmasq from starting.
+    # Repair devices flashed from older Ossuary images, whose build masked
+    # wpa_supplicant (no WiFi at all under NetworkManager) and shipped the full
+    # dnsmasq package (its service holds port 53, so the hotspot's DNS/DHCP
+    # can't start).
+    if [ "$(systemctl is-enabled wpa_supplicant.service 2>/dev/null)" = "masked" ]; then
+        log "Unmasking wpa_supplicant (NetworkManager needs it for WiFi)"
+        systemctl unmask wpa_supplicant.service >> "$LOG_FILE" 2>&1 || true
+    fi
     if systemctl is-enabled --quiet dnsmasq.service 2>/dev/null; then
-        warning "The dnsmasq service is enabled; it conflicts with the setup hotspot. Disable it with: sudo systemctl disable --now dnsmasq"
+        if [ "$mode" -gt 0 ] && [ -d "$INSTALL_DIR" ]; then
+            warning "Disabling the system dnsmasq service: it holds port 53 and breaks the setup hotspot"
+            systemctl disable --now dnsmasq.service >> "$LOG_FILE" 2>&1 || true
+        else
+            warning "The dnsmasq service is enabled; it conflicts with the setup hotspot. Disable it with: sudo systemctl disable --now dnsmasq"
+        fi
+    fi
+    if [ "$OSSUARY_IMAGE_BUILD" != "1" ] && [ "$mode" -gt 0 ]; then
+        # Updates skip the fresh-install package step; make sure the hotspot's tools exist.
+        for pkg in dnsmasq-base iw rfkill; do
+            dpkg -s "$pkg" >/dev/null 2>&1 || apt-get install -y "$pkg" >> "$LOG_FILE" 2>&1 || warning "Could not install $pkg"
+        done
     fi
 
     # Skip service restarts and verification in image build mode (no systemd in chroot)

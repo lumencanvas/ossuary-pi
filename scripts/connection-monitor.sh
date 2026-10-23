@@ -42,10 +42,15 @@ b = config.get('behaviors') or {}
 lost = b.get('on_connection_lost') or {}
 regained = b.get('on_connection_regained') or {}
 refresh = b.get('scheduled_refresh') or {}
-print(lost.get('action', 'show_overlay'))
-print(regained.get('action', 'refresh_page'))
-print(int(regained.get('delay_seconds', 3) or 0))
-print(int(refresh.get('interval_minutes', 60) or 0) if refresh.get('enabled') else 0)
+def whole(value, default):
+    try:
+        return max(0, int(value))
+    except (TypeError, ValueError):
+        return default
+print(lost.get('action', 'show_overlay') if isinstance(lost, dict) else 'show_overlay')
+print(regained.get('action', 'refresh_page') if isinstance(regained, dict) else 'refresh_page')
+print(whole(regained.get('delay_seconds', 3), 3) if isinstance(regained, dict) else 3)
+print(whole(refresh.get('interval_minutes', 60), 60) if isinstance(refresh, dict) and refresh.get('enabled') else 0)
 PY
 )
     BEHAVIOR_LOST=$(sed -n 1p <<< "$result")
@@ -82,8 +87,11 @@ refresh_chromium() {
 switch_profile() {
     local profile="$1" result
     result=$(python3 - "$CONFIG_FILE" "$profile" <<'PY' 2>&1
-import json, os, sys
+import fcntl, json, os, sys
 path, name = sys.argv[1], sys.argv[2]
+# Same lock as config-server.py, so a schedule switch can't race a UI save.
+lock = os.open('/etc/ossuary/config.lock', os.O_RDWR | os.O_CREAT, 0o600)
+fcntl.flock(lock, fcntl.LOCK_EX)
 config = json.load(open(path))
 command = ((config.get('profiles') or {}).get(name) or {}).get('command', '').strip()
 if not command:
@@ -94,7 +102,7 @@ if config.get('startup_command') == command:
     sys.exit(0)
 config['startup_command'] = command
 config['active_profile'] = name
-tmp = path + '.tmp'
+tmp = path + '.monitor.tmp'
 with open(tmp, 'w') as f:
     json.dump(config, f, indent=2)
     f.flush()

@@ -25,6 +25,7 @@ LAN (or in the kiosk) cannot drive this API.
 """
 
 import copy
+import fcntl
 import hmac
 import json
 import os
@@ -51,6 +52,35 @@ CODE_HEADER = "X-Ossuary-Code"
 CODE_ALPHABET = "ABCDEFGHJKMNPQRSTUVWXYZ23456789"  # no 0/O, 1/I/L
 
 CONFIG_LOCK = threading.RLock()
+# Cross-process lock: connection-monitor.sh also rewrites config.json.
+CONFIG_FLOCK = "/etc/ossuary/config.lock"
+
+
+class _FileLock:
+    """flock on CONFIG_FLOCK, re-entrant within this process.
+
+    Always used while holding CONFIG_LOCK (so one thread at a time). It must
+    be re-entrant: update_config() holds it while calling save_config(), and a
+    second open()+flock() of the same file in one process blocks on the first
+    (flock locks belong to the open file description), i.e. a deadlock.
+    """
+    depth = 0
+    fd = None
+
+    def __enter__(self):
+        if _FileLock.depth == 0:
+            os.makedirs(os.path.dirname(CONFIG_FLOCK), exist_ok=True)
+            _FileLock.fd = os.open(CONFIG_FLOCK, os.O_RDWR | os.O_CREAT, 0o600)
+            fcntl.flock(_FileLock.fd, fcntl.LOCK_EX)
+        _FileLock.depth += 1
+        return self
+
+    def __exit__(self, *exc):
+        _FileLock.depth -= 1
+        if _FileLock.depth == 0:
+            fcntl.flock(_FileLock.fd, fcntl.LOCK_UN)
+            os.close(_FileLock.fd)
+            _FileLock.fd = None
 
 # Config schema for validation (basic type checking)
 CONFIG_SCHEMA = {
@@ -143,15 +173,21 @@ def load_config():
         if os.path.exists(CONFIG_FILE):
             try:
                 with open(CONFIG_FILE, 'r') as f:
-                    config = deep_merge(DEFAULT_CONFIG, json.load(f))
+                    saved = json.load(f)
+                if isinstance(saved, dict):
+                    config = deep_merge(DEFAULT_CONFIG, saved)
+                else:
+                    print(f"[WARN] {CONFIG_FILE} is not a JSON object; using defaults", flush=True)
             except (OSError, ValueError) as e:
                 print(f"[WARN] Could not read {CONFIG_FILE}: {e}", flush=True)
+        if not isinstance(config.get('startup_command'), str):
+            config['startup_command'] = ''
         return strip_secrets(config)
 
 
 def save_config(config):
     """Atomic write (survives power loss)."""
-    with CONFIG_LOCK:
+    with CONFIG_LOCK, _FileLock():
         strip_secrets(config)
         os.makedirs(os.path.dirname(CONFIG_FILE), exist_ok=True)
         tmp_file = CONFIG_FILE + '.tmp'
@@ -165,7 +201,7 @@ def save_config(config):
 
 def update_config(mutator):
     """Read-modify-write under the lock, so concurrent requests can't lose updates."""
-    with CONFIG_LOCK:
+    with CONFIG_LOCK, _FileLock():
         config = load_config()
         result = mutator(config)
         save_config(config)
@@ -585,7 +621,7 @@ class ConfigHandler(SimpleHTTPRequestHandler):
             'ap_mode': ap_mode,
             'hostname': socket.gethostname(),
             'ip': ip,
-            'configured': bool(config.get('startup_command', '').strip()),
+            'configured': bool((config.get('startup_command') or '').strip()),
         })
 
     def handle_auth_check(self):
@@ -668,6 +704,13 @@ class ConfigHandler(SimpleHTTPRequestHandler):
         self.send_json_response(load_config().get('behaviors', {}))
 
     def handle_save_behaviors(self, data):
+        allowed = {'on_connection_lost', 'on_connection_regained', 'scheduled_refresh'}
+        for key, value in data.items():
+            if key not in allowed or not isinstance(value, dict):
+                return self.send_json_response({'error': f'Unknown or invalid behavior: {key}'}, 400)
+            for num in ('delay_seconds', 'interval_minutes', 'timeout_seconds'):
+                if num in value and not (isinstance(value[num], int) and 0 <= value[num] <= 10080):
+                    return self.send_json_response({'error': f'{key}.{num} must be a whole number'}, 400)
         update_config(lambda c: c.setdefault('behaviors', {}).update(data))
         self._signal_connection_monitor()
         self.send_json_response({'success': True})
@@ -940,22 +983,16 @@ class ConfigHandler(SimpleHTTPRequestHandler):
         self.send_json_response({'saved_networks': networks})
 
     def _join_from_hotspot(self, ssid, password):
-        existing = [c for c in nm_wifi_connections() if c[3] != 'ap' and c[2] == ssid]
+        # Unauthenticated (open hotspot), so this only ever ADDS a profile.
+        # Existing profiles are never modified or deleted from here: otherwise
+        # anyone near the hotspot could wipe the venue's saved password.
+        # If the new profile never connects, wifi-connect-manager.sh deletes it.
         common = ['connection.autoconnect', 'yes', 'connection.autoconnect-priority', '50']
         security = ['wifi-sec.key-mgmt', 'wpa-psk', 'wifi-sec.psk', password] if password else []
-        if existing:
-            uuid = existing[0][0]
-            args = ['nmcli', 'connection', 'modify', uuid] + common
-            if password:
-                args += security
-            else:
-                args += ['remove', '802-11-wireless-security']
-            r = subprocess.run(args, capture_output=True, text=True, timeout=15)
-        else:
-            r = subprocess.run(['nmcli', '-t', 'connection', 'add', 'type', 'wifi', 'con-name', ssid,
-                                'ssid', ssid] + common + security, capture_output=True, text=True, timeout=15)
-            m = re.search(r'\(([0-9a-f-]{36})\)', r.stdout)
-            uuid = m.group(1) if m else ''
+        r = subprocess.run(['nmcli', 'connection', 'add', 'type', 'wifi', 'con-name', ssid,
+                            'ssid', ssid] + common + security, capture_output=True, text=True, timeout=15)
+        m = re.search(r'\(([0-9a-f-]{36})\)', r.stdout)
+        uuid = m.group(1) if m else ''
         if r.returncode != 0 or not uuid:
             return self.send_json_response({'error': r.stderr.strip() or 'Could not save the network'}, 400)
         os.makedirs(os.path.dirname(PENDING_WIFI_FILE), exist_ok=True)

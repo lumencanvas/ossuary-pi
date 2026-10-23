@@ -25,9 +25,10 @@ except Exception:
 ' "$OSSUARY_CONFIG_FILE" 2>/dev/null)
     fi
 
-    # Whoever is actually logged in on the display wins over configuration:
-    # launching into anyone else's session fails ("Failed to connect to Wayland
-    # display") and leaves the screen empty.
+    # Without an explicit kiosk_user, whoever is actually logged in on the
+    # display wins over LightDM's configuration: launching into anyone else's
+    # session fails ("Failed to connect to Wayland display") and leaves the
+    # screen empty.
     if [ -z "$user" ]; then
         for sock in /run/user/*/wayland-[0-9]; do
             [ -S "$sock" ] || continue

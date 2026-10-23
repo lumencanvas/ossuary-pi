@@ -207,15 +207,15 @@ run_command() {
     wait_for_network_if_needed "$raw_command"
 
     while true; do
-        local current
-        current=$(get_command)
-        if [ "$current" != "$raw_command" ]; then
-            log "Startup command changed"
-            return 0
-        fi
-
+        RELOAD_REQUESTED=0
         if is_chromium_command "$raw_command"; then
             ossuary_wait_for_display "$user" 90 || log "Display session not detected; starting anyway"
+        fi
+        # Checked after the (possibly long) display wait, so a change saved
+        # meanwhile is not launched with the old command.
+        if [ "$(get_command)" != "$raw_command" ]; then
+            log "Startup command changed"
+            return 0
         fi
         display_type=$(ossuary_display_type "$user")
         exports=$(ossuary_session_exports "$user")
@@ -241,8 +241,10 @@ run_command() {
             sleep 1
         fi
 
+        if [ "$RELOAD_REQUESTED" = 1 ]; then
+            continue  # configuration changed while preparing: re-read it
+        fi
         log "Starting as $user ($display_type): $command"
-        RELOAD_REQUESTED=0
         launch_as_kiosk "$user" "$exports" "$extra_env" "$command"
         wait "$CHILD_PID"
         exit_code=$?
