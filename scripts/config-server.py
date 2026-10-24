@@ -40,6 +40,10 @@ import time
 from http.server import SimpleHTTPRequestHandler, ThreadingHTTPServer
 from urllib.parse import urlparse, parse_qs
 
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+import display_mode  # noqa: E402
+import web_shell  # noqa: E402
+
 CONFIG_FILE = "/etc/ossuary/config.json"
 SETUP_CODE_FILE = "/etc/ossuary/setup-code"
 BOOT_CODE_FILE = "/boot/firmware/ossuary-setup-code.txt"
@@ -126,7 +130,21 @@ DEFAULT_CONFIG = {
     # files in /etc/NetworkManager/system-connections). This list only holds
     # notes and timestamps for the UI.
     "saved_networks": [],
+    # Screen mode per output, applied at every boot (display_mode.py).
+    "display": {"outputs": {}},
+    # The panel's terminal. Off until the owner switches it on.
+    "shell": {"enabled": False},
+    # Named commands shown as buttons in the Control tab, run as the kiosk user.
+    "custom_actions": [],
 }
+
+# Services a kiosk doesn't need. "Lean mode" disables them; turning it off
+# enables them again. Nothing the kiosk relies on (network, .local, audio,
+# USB drives, the desktop session) is in this list.
+LEAN_UNITS = ['apt-daily.timer', 'apt-daily-upgrade.timer', 'man-db.timer',
+              'ModemManager.service', 'rpcbind.service', 'rpcbind.socket', 'nfs-blkmap.service']
+BLUETOOTH_UNITS = ['bluetooth.service']
+DISPLAY_REVERT_SECONDS = 20
 
 UI_PRESET_TO_PROFILE = {"lumencanvas": "lumencanvas", "webgpu": "webgpu_kiosk", "custom": "custom"}
 
@@ -284,6 +302,26 @@ def publish_code_to_boot_partition(code):
 
 
 SETUP_CODE = None  # set in run_server()
+
+# Screen modes being tried: output -> {mode, previous, timer, deadline}.
+PENDING_MODES = {}
+PENDING_MODE_LOCK = threading.Lock()
+
+
+def revert_display_mode(output):
+    """Put an output back to the mode it had before the one being tried."""
+    with PENDING_MODE_LOCK:
+        pending = PENDING_MODES.pop(output, None)
+    if not pending:
+        return False
+    pending['timer'].cancel()
+    try:
+        display_mode.set_mode(kiosk_user(), output, pending['previous'])
+        print(f"[display] {output} reverted to {pending['previous']}", flush=True)
+        return True
+    except Exception as e:
+        print(f"[display] revert of {output} failed: {e}", flush=True)
+        return False
 
 
 class FailedAttempts:
@@ -508,6 +546,10 @@ class ConfigHandler(SimpleHTTPRequestHandler):
         '/api/auth/check': 'handle_auth_check',
         '/api/wifi-country': 'handle_get_wifi_country',
         '/api/hostname': 'handle_get_hostname',
+        '/api/display/modes': 'handle_get_display_modes',
+        '/api/shell/settings': 'handle_get_shell_settings',
+        '/api/actions': 'handle_get_actions',
+        '/api/system/lean': 'handle_get_lean',
         '/api/setup-code': 'handle_get_setup_code',
         '/startup': 'handle_get_startup',
         '/networks': 'handle_get_nearby_networks_compat',
@@ -533,6 +575,13 @@ class ConfigHandler(SimpleHTTPRequestHandler):
         '/api/display/power': 'handle_set_display_power',
         '/api/wifi-country': 'handle_set_wifi_country',
         '/api/hostname': 'handle_set_hostname',
+        '/api/display/mode': 'handle_try_display_mode',
+        '/api/display/mode/keep': 'handle_keep_display_mode',
+        '/api/display/mode/revert': 'handle_revert_display_mode',
+        '/api/shell/settings': 'handle_set_shell_settings',
+        '/api/actions': 'handle_save_actions',
+        '/api/actions/run': 'handle_run_action',
+        '/api/system/lean': 'handle_set_lean',
         '/api/setup-code': 'handle_set_setup_code',
         '/connect': 'handle_wifi_connect',
     }
@@ -546,6 +595,8 @@ class ConfigHandler(SimpleHTTPRequestHandler):
             return self.serve_welcome()
         if path == '/api/status' or path == '/status':
             return self.handle_status()
+        if path == '/api/shell':
+            return self.handle_shell()
         if path.startswith('/api/logs/'):
             if self.authorized():
                 self.handle_get_logs(path[len('/api/logs/'):])
@@ -815,6 +866,174 @@ class ConfigHandler(SimpleHTTPRequestHandler):
         SETUP_CODE = code
         publish_code_to_boot_partition(code)
         self.send_json_response({'success': True, 'code': code})
+
+    # ---------------------------------------------------------------- screen mode
+
+    def handle_get_display_modes(self):
+        try:
+            outputs = display_mode.list_outputs(kiosk_user())
+        except Exception as e:
+            return self.send_json_response({'error': str(e)}, 503)
+        with PENDING_MODE_LOCK:
+            pending = {k: {'mode': v['mode'], 'seconds_left': max(0, int(v['deadline'] - time.monotonic()))}
+                       for k, v in PENDING_MODES.items()}
+        self.send_json_response({'outputs': outputs, 'saved': display_mode.saved_modes(CONFIG_FILE),
+                                 'pending': pending})
+
+    def handle_try_display_mode(self, data):
+        """Switch now; revert in DISPLAY_REVERT_SECONDS unless kept."""
+        output, mode = data.get('output'), data.get('mode')
+        user = kiosk_user()
+        try:
+            current = next((o for o in display_mode.list_outputs(user) if o['name'] == output), None)
+            if not current:
+                return self.send_json_response({'error': 'No such output'}, 404)
+            if mode != 'auto' and mode not in {m['mode'] for m in current['modes']}:
+                return self.send_json_response({'error': 'That screen does not offer this mode'}, 400)
+            with PENDING_MODE_LOCK:
+                previous = PENDING_MODES.pop(output, {}).get('previous') or current['current'] or 'auto'
+                display_mode.set_mode(user, output, mode)
+                timer = threading.Timer(DISPLAY_REVERT_SECONDS, revert_display_mode, args=(output,))
+                timer.daemon = True
+                PENDING_MODES[output] = {'mode': mode, 'previous': previous, 'timer': timer,
+                                         'deadline': time.monotonic() + DISPLAY_REVERT_SECONDS}
+                timer.start()
+        except (ValueError, RuntimeError) as e:
+            return self.send_json_response({'error': str(e)}, 400)
+        self.send_json_response({'success': True, 'pending': True, 'revert_in': DISPLAY_REVERT_SECONDS})
+
+    def handle_keep_display_mode(self, data):
+        output = data.get('output')
+        with PENDING_MODE_LOCK:
+            pending = PENDING_MODES.pop(output, None)
+        if not pending:
+            return self.send_json_response({'error': 'Nothing to keep (it may already have reverted)'}, 409)
+        pending['timer'].cancel()
+        update_config(lambda c: c.setdefault('display', {}).setdefault('outputs', {}).update({output: pending['mode']}))
+        self.send_json_response({'success': True, 'mode': pending['mode']})
+
+    def handle_revert_display_mode(self, data):
+        ok = revert_display_mode(data.get('output'))
+        self.send_json_response({'success': ok})
+
+    # ---------------------------------------------------------------- shell
+
+    def handle_get_shell_settings(self):
+        self.send_json_response({'enabled': bool(load_config().get('shell', {}).get('enabled'))})
+
+    def handle_set_shell_settings(self, data):
+        enabled = data.get('enabled')
+        if not isinstance(enabled, bool):
+            return self.send_json_response({'error': 'enabled must be true or false'}, 400)
+        update_config(lambda c: c.setdefault('shell', {}).update({'enabled': enabled}))
+        self.send_json_response({'success': True, 'enabled': enabled})
+
+    def handle_shell(self):
+        """WebSocket upgrade for the panel terminal; the code arrives in the first message."""
+        if not load_config().get('shell', {}).get('enabled'):
+            return self.send_json_response({'error': 'The shell is switched off in the Control tab'}, 403)
+        key = self.headers.get('Sec-WebSocket-Key')
+        if (self.headers.get('Upgrade') or '').lower() != 'websocket' or not key:
+            return self.send_json_response({'error': 'WebSocket upgrade required'}, 400)
+        # Only the panel's own pages may open it (hostname match, any port).
+        origin_host = urlparse(self.headers.get('Origin') or '').hostname
+        host = (self.headers.get('Host') or '').rsplit(':', 1)[0].strip('[]').lower()
+        if not origin_host or origin_host.lower() != host:
+            return self.send_json_response({'error': 'Cross-origin shell refused'}, 403)
+        user = kiosk_user()
+        if not user:
+            return self.send_json_response({'error': 'No kiosk user'}, 503)
+        ip = self.client_ip()
+
+        def check_code(code):
+            if FAILED.blocked(ip):
+                return False, 'Too many wrong setup codes. Try again in a few minutes.'
+            given = normalize_code(code)
+            if given and hmac.compare_digest(given, normalize_code(SETUP_CODE)):
+                return True, ''
+            FAILED.record(ip)
+            return False, 'Setup code required'
+
+        self.send_response(101, 'Switching Protocols')
+        self.send_header('Upgrade', 'websocket')
+        self.send_header('Connection', 'Upgrade')
+        self.send_header('Sec-WebSocket-Accept', web_shell.accept_key(key))
+        super().end_headers()
+        self.wfile.flush()
+        self.close_connection = True
+        print(f"[shell] opened from {ip}", flush=True)
+        web_shell.run_session(self.connection, self.rfile, check_code, user, session_env(user))
+        print(f"[shell] closed from {ip}", flush=True)
+
+    # ---------------------------------------------------------------- custom actions
+
+    def handle_get_actions(self):
+        self.send_json_response({'actions': load_config().get('custom_actions', [])})
+
+    def handle_save_actions(self, data):
+        actions = data.get('actions')
+        if not isinstance(actions, list) or len(actions) > 30:
+            return self.send_json_response({'error': 'actions must be a list (up to 30)'}, 400)
+        clean = []
+        for a in actions:
+            if not isinstance(a, dict):
+                return self.send_json_response({'error': 'Each action needs a name and a command'}, 400)
+            name, command = str(a.get('name', '')).strip(), str(a.get('command', '')).strip()
+            if not name or not command or len(name) > 40 or len(command) > 2000:
+                return self.send_json_response({'error': 'Each action needs a name (up to 40) and a command'}, 400)
+            action_id = str(a.get('id') or '') or secrets.token_hex(4)
+            if not re.fullmatch(r'[a-f0-9]{8}', action_id):
+                action_id = secrets.token_hex(4)
+            clean.append({'id': action_id, 'name': name, 'command': command})
+        update_config(lambda c: c.update({'custom_actions': clean}))
+        self.send_json_response({'success': True, 'actions': clean})
+
+    def handle_run_action(self, data):
+        action = next((a for a in load_config().get('custom_actions', []) if a.get('id') == data.get('id')), None)
+        if not action:
+            return self.send_json_response({'error': 'No such action'}, 404)
+        try:
+            r = run_as_kiosk(['bash', '-lc', action['command']], timeout=60)
+        except subprocess.TimeoutExpired:
+            return self.send_json_response({'success': False, 'output': 'Timed out after 60 s'})
+        except RuntimeError as e:
+            return self.send_json_response({'error': str(e)}, 503)
+        out = (r.stdout + r.stderr).decode(errors='replace')[-8000:]
+        self.send_json_response({'success': r.returncode == 0, 'exit_code': r.returncode, 'output': out})
+
+    # ---------------------------------------------------------------- lean mode
+
+    def handle_get_lean(self):
+        def enabled(unit):
+            r = subprocess.run(['systemctl', 'is-enabled', unit], capture_output=True, text=True, timeout=5)
+            return r.stdout.strip()
+        lean = {u: enabled(u) for u in LEAN_UNITS}
+        bt = {u: enabled(u) for u in BLUETOOTH_UNITS}
+        present = [s for s in lean.values() if s not in ('', 'not-found')]
+        self.send_json_response({
+            'lean': bool(present) and all(s in ('disabled', 'masked') for s in present),
+            'bluetooth': any(s == 'enabled' for s in bt.values()),
+            'units': {**lean, **bt},
+        })
+
+    def handle_set_lean(self, data):
+        results = {}
+
+        def switch(units, on):
+            for u in units:
+                r = subprocess.run(['systemctl', 'enable' if on else 'disable', '--now', u],
+                                   capture_output=True, text=True, timeout=60)
+                results[u] = 'ok' if r.returncode == 0 else (r.stderr.strip() or 'failed')
+
+        if 'lean' in data:
+            if not isinstance(data['lean'], bool):
+                return self.send_json_response({'error': 'lean must be true or false'}, 400)
+            switch(LEAN_UNITS, not data['lean'])
+        if 'bluetooth' in data:
+            if not isinstance(data['bluetooth'], bool):
+                return self.send_json_response({'error': 'bluetooth must be true or false'}, 400)
+            switch(BLUETOOTH_UNITS, data['bluetooth'])
+        self.send_json_response({'success': True, 'results': results})
 
     def handle_get_hostname(self):
         self.send_json_response({'hostname': socket.gethostname()})

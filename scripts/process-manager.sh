@@ -101,6 +101,15 @@ memory_watchdog() {
     done
 }
 
+# Apply the screen mode saved in the panel (display_mode.py) once the
+# desktop session is up.
+apply_display_mode() {
+    local helper
+    for helper in "$SCRIPT_DIR/display_mode.py" "$SCRIPT_DIR/scripts/display_mode.py" /opt/ossuary/scripts/display_mode.py; do
+        [ -f "$helper" ] && { python3 "$helper" apply "$1" 2>&1 | while read -r line; do log "$line"; done; return; }
+    done
+}
+
 is_chromium_command() {
     echo "$1" | grep -qE '(^|[[:space:]/])(chromium(-browser)?|google-chrome)([[:space:]]|$)'
 }
@@ -207,6 +216,7 @@ show_welcome_page() {
     home=$(ossuary_user_home "$user")
     log "No startup command configured: showing the welcome page as $user"
     ossuary_wait_for_display "$user" 90 || log "Display session not detected yet; launching anyway"
+    apply_display_mode "$user"
     display_type=$(ossuary_display_type "$user")
     exports=$(ossuary_session_exports "$user")
     prepare_chromium "$home/.config/chromium-kiosk"
@@ -259,6 +269,7 @@ run_command() {
         RELOAD_REQUESTED=0
         if is_chromium_command "$raw_command"; then
             ossuary_wait_for_display "$user" 90 || log "Display session not detected; starting anyway"
+            apply_display_mode "$user"
         fi
         # Checked after the (possibly long) display wait, so a change saved
         # meanwhile is not launched with the old command.

@@ -29,6 +29,10 @@
 - **LumenCanvas first-class support** — WebGPU enabled, kiosk optimized, refresh behaviors built-in
 - **Captive portal configuration** — Configure WiFi and startup commands from any device
 - **Always-accessible control panel** — Web UI at `http://hostname.local` (or `:8081`) when connected, protected by a per-device setup code
+- **Screen resolution** — Pick the output mode from the Control tab; it reverts after 20 s unless you keep it, and the choice is reapplied at boot
+- **Web shell** — A terminal on the Pi in the browser (xterm.js), off until you allow it in the Control tab
+- **Custom actions** — Your own named commands as one-tap buttons in the Control tab
+- **Lean mode** — Switches off services a kiosk doesn't need (auto package updates, modem manager, NFS, man-db), reversible; Bluetooth has its own switch
 - **Memory watchdog** — Restarts the kiosk if RAM + swap stays above 90% (adjustable, or off) instead of freezing
 - **Rename the device** — Change the hostname (and its `.local` address) from the Control tab, no reboot
 - **Connection-aware behaviors** — Auto-refresh on reconnection, scheduled refreshes, connection monitoring

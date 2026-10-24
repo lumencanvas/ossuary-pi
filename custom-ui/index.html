@@ -597,6 +597,52 @@
             </div>
 
             <div class="info-box" style="margin-top: var(--space-md);">
+                <h3>Screen Resolution</h3>
+                <p style="margin-bottom: var(--space-sm);">Lower resolutions are much lighter for the Pi to draw. A new mode reverts after 20 seconds unless you keep it, so a mode the screen can't show can't leave it dark.</p>
+                <div style="display: flex; gap: var(--space-sm); flex-wrap: wrap;">
+                    <select id="display-output" onchange="renderDisplayModes()" style="width: auto; display: none;"></select>
+                    <select id="display-mode" style="flex: 1; min-width: 180px;"></select>
+                    <button class="btn-small" style="padding: 0 var(--space-lg);" onclick="tryDisplayMode()">Apply</button>
+                </div>
+                <div id="display-confirm" style="display: none; margin-top: var(--space-sm); gap: var(--space-sm); align-items: center;">
+                    <span id="display-countdown" style="flex: 1; font-size: 12px;"></span>
+                    <button class="btn-small" onclick="keepDisplayMode()">Keep</button>
+                    <button class="btn-small" onclick="revertDisplayMode()">Revert</button>
+                </div>
+                <p class="hint" id="display-mode-hint"></p>
+            </div>
+
+            <div class="info-box" style="margin-top: var(--space-md);">
+                <h3>Lean Mode</h3>
+                <p style="margin-bottom: var(--space-sm);">Turns off services a kiosk doesn't need: automatic package updates (they can stutter a show), the modem manager, NFS and the manual-page indexer. Network, .local, audio, USB drives and the desktop stay on. Switch it off to bring them back.</p>
+                <div class="checkbox-item"><input type="checkbox" id="lean-mode" onchange="saveLean({ lean: this.checked })"><label for="lean-mode">Lean mode</label></div>
+                <div class="checkbox-item" style="margin-top: var(--space-xs);"><input type="checkbox" id="lean-bluetooth" onchange="saveLean({ bluetooth: this.checked })"><label for="lean-bluetooth">Bluetooth (leave on for Bluetooth remotes or keyboards)</label></div>
+                <p class="hint" id="lean-hint"></p>
+            </div>
+
+            <div class="info-box" style="margin-top: var(--space-md);">
+                <h3>Custom Actions</h3>
+                <p style="margin-bottom: var(--space-sm);">Your own one-tap commands, run as the kiosk user. Output shows below.</p>
+                <div id="actions-list"></div>
+                <div style="display: flex; gap: var(--space-sm); margin-top: var(--space-sm); flex-wrap: wrap;">
+                    <input type="text" id="action-name" maxlength="40" placeholder="Name, e.g. Show IP" style="flex: 1; min-width: 120px;">
+                    <input type="text" id="action-command" maxlength="2000" placeholder="Command, e.g. hostname -I" spellcheck="false" autocapitalize="off" style="flex: 2; min-width: 180px; font-family: 'IBM Plex Mono', monospace;">
+                    <button class="btn-small" style="padding: 0 var(--space-lg);" onclick="addAction()">Add</button>
+                </div>
+                <pre id="action-output" style="display: none; margin-top: var(--space-sm); max-height: 200px; overflow: auto; font-size: 11px; white-space: pre-wrap; background: var(--ink); color: var(--paper); padding: var(--space-sm);"></pre>
+            </div>
+
+            <div class="info-box" style="margin-top: var(--space-md);">
+                <h3>Shell</h3>
+                <p style="margin-bottom: var(--space-sm);">A terminal on the Pi as the kiosk user, in your browser. The panel isn't encrypted, so on a shared network someone listening could see what you type: leave it off when you don't need it.</p>
+                <div style="display: flex; gap: var(--space-sm); align-items: center;">
+                    <div class="checkbox-item" style="flex: 1; margin: 0;"><input type="checkbox" id="shell-enabled" onchange="saveShellEnabled()"><label for="shell-enabled">Allow the shell</label></div>
+                    <button class="btn-small" id="shell-open" onclick="window.open('/shell.html', '_blank')" disabled>Open Shell</button>
+                </div>
+                <p class="hint" id="shell-hint"></p>
+            </div>
+
+            <div class="info-box" style="margin-top: var(--space-md);">
                 <h3>Memory Watchdog</h3>
                 <p style="margin-bottom: var(--space-sm);">Restarts the kiosk if the Pi nearly runs out of memory (RAM and swap together, for about a minute), instead of freezing or crashing. Now using <span id="memory-now">…</span>.</p>
                 <div style="display: flex; gap: var(--space-sm); align-items: center;">
@@ -1042,7 +1088,7 @@
             if (tab === 'networks') { loadSavedNetworks(); loadWifiCountry(); }
             if (tab === 'schedule') { loadSchedule(); loadTimezone(); }
             if (tab === 'display') loadCurrentConfig();
-            if (tab === 'control') { loadProcessStatus(); loadHostname(); loadMemoryWatchdog(); }
+            if (tab === 'control') { loadProcessStatus(); loadHostname(); loadMemoryWatchdog(); loadDisplayModes(); loadLean(); loadActions(); loadShellSettings(); }
             if (tab === 'logs') loadLogs();
         }
 
@@ -1213,6 +1259,183 @@
             } catch (e) {
                 hint.textContent = e.message;
             }
+        }
+
+        function escapeHtml(text) {
+            return String(text ?? '').replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
+        }
+
+        // Screen resolution
+        let displayData = null;
+        let displayCountdownTimer = null;
+        async function loadDisplayModes() {
+            const hint = document.getElementById('display-mode-hint');
+            try {
+                displayData = await apiJson('/api/display/modes');
+            } catch (e) {
+                hint.textContent = e.message;
+                return;
+            }
+            const outSel = document.getElementById('display-output');
+            outSel.innerHTML = displayData.outputs.map(o => `<option value="${escapeHtml(o.name)}">${escapeHtml(o.name)}</option>`).join('');
+            outSel.style.display = displayData.outputs.length > 1 ? '' : 'none';
+            renderDisplayModes();
+            const pending = Object.entries(displayData.pending || {})[0];
+            if (pending) showDisplayCountdown(pending[0], pending[1].seconds_left);
+        }
+
+        function renderDisplayModes() {
+            const name = document.getElementById('display-output').value;
+            const out = (displayData?.outputs || []).find(o => o.name === name);
+            const sel = document.getElementById('display-mode');
+            if (!out) { sel.innerHTML = ''; return; }
+            sel.innerHTML = `<option value="auto">Auto (screen's preferred)</option>` + out.modes.map(m =>
+                `<option value="${escapeHtml(m.mode)}">${escapeHtml(m.label)}${m.mode === out.preferred ? ' (preferred)' : ''}</option>`).join('');
+            const saved = displayData.saved?.[name];
+            sel.value = saved && saved !== 'auto' ? saved : (out.current || 'auto');
+            const cur = out.modes.find(m => m.mode === out.current);
+            document.getElementById('display-mode-hint').textContent = cur ? `Now: ${cur.label}` : '';
+        }
+
+        function showDisplayCountdown(output, seconds) {
+            const box = document.getElementById('display-confirm');
+            box.style.display = 'flex';
+            box.dataset.output = output;
+            clearInterval(displayCountdownTimer);
+            const tick = () => {
+                document.getElementById('display-countdown').textContent = `Keep this resolution? Reverting in ${seconds}s`;
+                if (seconds-- <= 0) { clearInterval(displayCountdownTimer); box.style.display = 'none'; loadDisplayModes(); }
+            };
+            tick();
+            displayCountdownTimer = setInterval(tick, 1000);
+        }
+
+        async function tryDisplayMode() {
+            const output = document.getElementById('display-output').value;
+            const mode = document.getElementById('display-mode').value;
+            try {
+                const r = await apiJson('/api/display/mode', { method: 'POST', body: { output, mode } });
+                showDisplayCountdown(output, r.revert_in);
+            } catch (e) {
+                document.getElementById('display-mode-hint').textContent = e.message;
+            }
+        }
+
+        async function keepDisplayMode() {
+            const output = document.getElementById('display-confirm').dataset.output;
+            clearInterval(displayCountdownTimer);
+            document.getElementById('display-confirm').style.display = 'none';
+            try {
+                await apiJson('/api/display/mode/keep', { method: 'POST', body: { output } });
+                document.getElementById('display-mode-hint').textContent = 'Kept. It will be used at every boot.';
+            } catch (e) {
+                document.getElementById('display-mode-hint').textContent = e.message;
+            }
+            loadDisplayModes();
+        }
+
+        async function revertDisplayMode() {
+            const output = document.getElementById('display-confirm').dataset.output;
+            clearInterval(displayCountdownTimer);
+            document.getElementById('display-confirm').style.display = 'none';
+            try { await apiJson('/api/display/mode/revert', { method: 'POST', body: { output } }); } catch (e) {}
+            loadDisplayModes();
+        }
+
+        // Lean mode
+        async function loadLean() {
+            try {
+                const d = await apiJson('/api/system/lean');
+                document.getElementById('lean-mode').checked = d.lean;
+                document.getElementById('lean-bluetooth').checked = d.bluetooth;
+            } catch (e) {}
+        }
+
+        async function saveLean(change) {
+            const hint = document.getElementById('lean-hint');
+            hint.textContent = 'Applying…';
+            try {
+                const r = await apiJson('/api/system/lean', { method: 'POST', body: change });
+                const failed = Object.entries(r.results || {}).filter(([, v]) => v !== 'ok');
+                hint.textContent = failed.length ? `Some services could not change: ${failed.map(([k]) => k).join(', ')}` : 'Done.';
+            } catch (e) {
+                hint.textContent = e.message;
+            }
+            loadLean();
+        }
+
+        // Custom actions
+        let customActions = [];
+        async function loadActions() {
+            try { customActions = (await apiJson('/api/actions')).actions || []; } catch (e) { customActions = []; }
+            renderActions();
+        }
+
+        function renderActions() {
+            document.getElementById('actions-list').innerHTML = customActions.length ? customActions.map(a => `
+                <div style="display: flex; gap: var(--space-sm); align-items: center; margin-bottom: var(--space-xs);">
+                    <button class="btn-small" style="flex: 1; text-align: left;" onclick="runAction('${a.id}')" title="${escapeHtml(a.command)}">${escapeHtml(a.name)}</button>
+                    <button class="btn-small" onclick="removeAction('${a.id}')" title="Remove">✕</button>
+                </div>`).join('') : '<p class="hint">No actions yet.</p>';
+        }
+
+        async function saveActions(actions) {
+            try {
+                customActions = (await apiJson('/api/actions', { method: 'POST', body: { actions } })).actions;
+            } catch (e) {
+                showActionOutput(e.message);
+            }
+            renderActions();
+        }
+
+        function addAction() {
+            const name = document.getElementById('action-name').value.trim();
+            const command = document.getElementById('action-command').value.trim();
+            if (!name || !command) return;
+            document.getElementById('action-name').value = '';
+            document.getElementById('action-command').value = '';
+            saveActions([...customActions, { name, command }]);
+        }
+
+        function removeAction(id) {
+            saveActions(customActions.filter(a => a.id !== id));
+        }
+
+        function showActionOutput(text) {
+            const pre = document.getElementById('action-output');
+            pre.style.display = 'block';
+            pre.textContent = text;
+        }
+
+        async function runAction(id) {
+            const a = customActions.find(x => x.id === id);
+            showActionOutput(`$ ${a ? a.command : ''}\nRunning…`);
+            try {
+                const r = await apiJson('/api/actions/run', { method: 'POST', body: { id } });
+                showActionOutput(`$ ${a.command}\n${r.output || ''}${r.success ? '' : `\n(exit ${r.exit_code ?? '?'})`}`);
+            } catch (e) {
+                showActionOutput(e.message);
+            }
+        }
+
+        // Shell
+        async function loadShellSettings() {
+            try {
+                const d = await apiJson('/api/shell/settings');
+                document.getElementById('shell-enabled').checked = d.enabled;
+                document.getElementById('shell-open').disabled = !d.enabled;
+            } catch (e) {}
+        }
+
+        async function saveShellEnabled() {
+            const enabled = document.getElementById('shell-enabled').checked;
+            try {
+                await apiJson('/api/shell/settings', { method: 'POST', body: { enabled } });
+                document.getElementById('shell-hint').textContent = enabled ? 'Shell allowed.' : 'Shell switched off.';
+            } catch (e) {
+                document.getElementById('shell-hint').textContent = e.message;
+            }
+            loadShellSettings();
         }
 
         let setupCodeShown = false;

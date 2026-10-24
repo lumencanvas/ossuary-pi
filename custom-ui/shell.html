@@ -1,0 +1,87 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Ossuary Shell</title>
+    <link rel="stylesheet" href="/vendor/xterm.css">
+    <style>
+        :root { --paper: #1a1a1a; --ink: #f5f1eb; --ink-muted: #888888; --accent: #7cc4e8; --error: #e57373; }
+        html, body { margin: 0; height: 100%; background: var(--paper); color: var(--ink); font-family: 'IBM Plex Mono', monospace; }
+        body { display: flex; flex-direction: column; }
+        header { display: flex; align-items: center; gap: 12px; padding: 8px 12px; border-bottom: 1px solid #333; font-size: 12px; }
+        header strong { font-family: 'Space Mono', monospace; letter-spacing: 1px; text-transform: uppercase; }
+        #status { flex: 1; color: var(--ink-muted); }
+        #status.error { color: var(--error); }
+        button { font: inherit; font-size: 11px; text-transform: uppercase; letter-spacing: 0.5px; background: transparent; color: var(--ink); border: 1px solid #555; padding: 4px 10px; cursor: pointer; }
+        #term { flex: 1; min-height: 0; padding: 6px; }
+    </style>
+</head>
+<body>
+    <header>
+        <strong>Ossuary Shell</strong>
+        <span id="status">Connecting…</span>
+        <button id="reconnect" onclick="connect()" style="display: none;">Reconnect</button>
+    </header>
+    <div id="term"></div>
+
+    <script src="/vendor/xterm.js"></script>
+    <script src="/vendor/addon-fit.js"></script>
+    <script>
+        const CODE_KEY = 'ossuary_setup_code'; // same key the control panel uses
+        const statusEl = document.getElementById('status');
+        const term = new Terminal({ cursorBlink: true, fontFamily: "'IBM Plex Mono', Menlo, monospace", fontSize: 13,
+                                    theme: { background: '#1a1a1a', foreground: '#f5f1eb', cursor: '#7cc4e8' } });
+        const fit = new FitAddon.FitAddon();
+        term.loadAddon(fit);
+        term.open(document.getElementById('term'));
+        fit.fit();
+        let ws = null;
+
+        function setStatus(text, error) {
+            statusEl.textContent = text;
+            statusEl.className = error ? 'error' : '';
+            document.getElementById('reconnect').style.display = error || text === 'Disconnected' ? '' : 'none';
+        }
+
+        function storedCode() {
+            try { return localStorage.getItem(CODE_KEY) || ''; } catch (e) { return ''; }
+        }
+
+        function connect() {
+            let code = storedCode();
+            if (!code) {
+                code = (prompt('Setup code (shown on the kiosk, or in ossuary-setup-code.txt on the SD card)') || '').trim().toUpperCase();
+                if (!code) return setStatus('No setup code', true);
+            }
+            // Port 8081 directly: the port-80 portal proxy doesn't carry WebSockets.
+            const proto = location.protocol === 'https:' ? 'wss' : 'ws';
+            ws = new WebSocket(`${proto}://${location.hostname}:8081/api/shell`);
+            ws.binaryType = 'arraybuffer';
+            setStatus('Connecting…');
+            ws.onopen = () => {
+                ws.send(JSON.stringify({ type: 'auth', code, cols: term.cols, rows: term.rows }));
+                setStatus(`Connected to ${location.hostname}`);
+                term.focus();
+            };
+            ws.onmessage = (e) => {
+                if (typeof e.data === 'string') {
+                    try {
+                        const msg = JSON.parse(e.data);
+                        if (msg.type === 'error') setStatus(msg.message, true);
+                    } catch (err) {}
+                    return;
+                }
+                term.write(new Uint8Array(e.data));
+            };
+            ws.onclose = () => { if (!statusEl.classList.contains('error')) setStatus('Disconnected'); };
+            ws.onerror = () => setStatus('Could not connect. Is the shell allowed in the Control tab?', true);
+        }
+
+        term.onData(data => { if (ws && ws.readyState === 1) ws.send(JSON.stringify({ type: 'input', data })); });
+        term.onResize(({ cols, rows }) => { if (ws && ws.readyState === 1) ws.send(JSON.stringify({ type: 'resize', cols, rows })); });
+        window.addEventListener('resize', () => fit.fit());
+        connect();
+    </script>
+</body>
+</html>
