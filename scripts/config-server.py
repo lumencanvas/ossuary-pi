@@ -131,7 +131,7 @@ DEFAULT_CONFIG = {
     # notes and timestamps for the UI.
     "saved_networks": [],
     # Screen mode per output, applied at every boot (display_mode.py).
-    "display": {"outputs": {}},
+    "display": {"outputs": {}, "transforms": {}},
     # The panel's terminal. Off until the owner switches it on.
     "shell": {"enabled": False},
     # Named commands shown as buttons in the Control tab, run as the kiosk user.
@@ -578,6 +578,7 @@ class ConfigHandler(SimpleHTTPRequestHandler):
         '/api/display/mode': 'handle_try_display_mode',
         '/api/display/mode/keep': 'handle_keep_display_mode',
         '/api/display/mode/revert': 'handle_revert_display_mode',
+        '/api/display/transform': 'handle_set_display_transform',
         '/api/shell/settings': 'handle_set_shell_settings',
         '/api/actions': 'handle_save_actions',
         '/api/actions/run': 'handle_run_action',
@@ -911,6 +912,18 @@ class ConfigHandler(SimpleHTTPRequestHandler):
         pending['timer'].cancel()
         update_config(lambda c: c.setdefault('display', {}).setdefault('outputs', {}).update({output: pending['mode']}))
         self.send_json_response({'success': True, 'mode': pending['mode']})
+
+    def handle_set_display_transform(self, data):
+        """Rotate an output now and keep it (rotation never blanks the screen)."""
+        output, transform = data.get('output'), data.get('transform')
+        try:
+            if output not in {o['name'] for o in display_mode.list_outputs(kiosk_user())}:
+                return self.send_json_response({'error': 'No such output'}, 404)
+            display_mode.set_transform(kiosk_user(), output, transform)
+        except (ValueError, RuntimeError) as e:
+            return self.send_json_response({'error': str(e)}, 400)
+        update_config(lambda c: c.setdefault('display', {}).setdefault('transforms', {}).update({output: transform}))
+        self.send_json_response({'success': True, 'transform': transform})
 
     def handle_revert_display_mode(self, data):
         ok = revert_display_mode(data.get('output'))

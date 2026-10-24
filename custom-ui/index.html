@@ -604,6 +604,17 @@
                     <select id="display-mode" style="flex: 1; min-width: 180px;"></select>
                     <button class="btn-small" style="padding: 0 var(--space-lg);" onclick="tryDisplayMode()">Apply</button>
                 </div>
+                <div style="display: flex; gap: var(--space-sm); margin-top: var(--space-sm); align-items: center;">
+                    <label for="display-transform" style="margin: 0; font-size: 12px;">Rotation</label>
+                    <select id="display-transform" onchange="setDisplayTransform()" style="flex: 1;">
+                        <option value="normal">Normal</option>
+                        <option value="90">90° clockwise</option>
+                        <option value="180">180° (upside down)</option>
+                        <option value="270">270° clockwise</option>
+                        <option value="flipped">Mirrored</option>
+                        <option value="flipped-180">Mirrored, upside down (rear projection)</option>
+                    </select>
+                </div>
                 <div id="display-confirm" style="display: none; margin-top: var(--space-sm); gap: var(--space-sm); align-items: center;">
                     <span id="display-countdown" style="flex: 1; font-size: 12px;"></span>
                     <button class="btn-small" onclick="keepDisplayMode()">Keep</button>
@@ -1293,6 +1304,9 @@
                 `<option value="${escapeHtml(m.mode)}">${escapeHtml(m.label)}${m.mode === out.preferred ? ' (preferred)' : ''}</option>`).join('');
             const saved = displayData.saved?.[name];
             sel.value = saved && saved !== 'auto' ? saved : (out.current || 'auto');
+            const rot = document.getElementById('display-transform');
+            if (![...rot.options].some(o => o.value === out.transform)) rot.add(new Option(out.transform, out.transform));
+            rot.value = out.transform || 'normal';
             const cur = out.modes.find(m => m.mode === out.current);
             document.getElementById('display-mode-hint').textContent = cur ? `Now: ${cur.label}` : '';
         }
@@ -1316,6 +1330,17 @@
             try {
                 const r = await apiJson('/api/display/mode', { method: 'POST', body: { output, mode } });
                 showDisplayCountdown(output, r.revert_in);
+            } catch (e) {
+                document.getElementById('display-mode-hint').textContent = e.message;
+            }
+        }
+
+        async function setDisplayTransform() {
+            const output = document.getElementById('display-output').value;
+            const transform = document.getElementById('display-transform').value;
+            try {
+                await apiJson('/api/display/transform', { method: 'POST', body: { output, transform } });
+                document.getElementById('display-mode-hint').textContent = 'Rotation saved. It will be used at every boot.';
             } catch (e) {
                 document.getElementById('display-mode-hint').textContent = e.message;
             }

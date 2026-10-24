@@ -117,11 +117,22 @@ is_chromium_command() {
 # Clear Chromium's crash state so a power cut doesn't leave a "Restore pages?"
 # bubble over the kiosk.
 prepare_chromium() {
-    local profile_dir="$1" prefs
+    local profile_dir="$1" prefs lock lock_host
     for prefs in "$profile_dir/Default/Preferences" "$profile_dir/Local State"; do
         [ -f "$prefs" ] || continue
         sed -i 's/"exited_cleanly":false/"exited_cleanly":true/; s/"exit_type":"Crashed"/"exit_type":"Normal"/' "$prefs" 2>/dev/null || true
     done
+    # Chromium's profile lock is "<hostname>-<pid>". After the device is
+    # renamed, a lock naming the OLD hostname makes Chromium refuse to start
+    # ("profile in use on another computer", exit 21) forever. A lock from a
+    # different hostname can only be stale here, so remove it; a lock from
+    # this hostname is left for Chromium to judge.
+    lock=$(readlink "$profile_dir/SingletonLock" 2>/dev/null) || return 0
+    lock_host=${lock%-*}
+    if [ -n "$lock_host" ] && [ "$lock_host" != "$(hostname)" ]; then
+        log "Removing Chromium profile lock left by the old hostname ($lock_host)"
+        rm -f "$profile_dir/SingletonLock" "$profile_dir/SingletonCookie" "$profile_dir/SingletonSocket"
+    fi
 }
 
 # Insert kiosk flags right after the chromium binary, skipping any the command

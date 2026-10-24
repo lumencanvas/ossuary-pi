@@ -8,8 +8,10 @@ Used two ways:
     mode is applied at every boot:  display_mode.py apply <kiosk-user>
 
 The saved choice lives in /etc/ossuary/config.json as
-  "display": {"outputs": {"HDMI-A-2": "1280x720@60.000000"}}
-An output with no entry (or "auto") uses the screen's preferred mode.
+  "display": {"outputs": {"HDMI-A-2": "1280x720@60.000000"},
+              "transforms": {"HDMI-A-2": "180"}}
+An output with no entry (or "auto") uses the screen's preferred mode; one with
+no transform is left as it is ("normal" = unrotated).
 """
 
 import json
@@ -22,6 +24,8 @@ import sys
 CONFIG_FILE = "/etc/ossuary/config.json"
 MODE_RE = re.compile(r'^\d{2,5}x\d{2,5}(@\d{1,3}(\.\d+)?)?$')
 OUTPUT_RE = re.compile(r'^[A-Za-z0-9_.-]{1,40}$')
+# wlr-randr's names: rotation clockwise, "flipped" = mirrored horizontally first.
+TRANSFORMS = ('normal', '90', '180', '270', 'flipped', 'flipped-90', 'flipped-180', 'flipped-270')
 
 
 def session_env(user):
@@ -69,6 +73,7 @@ def list_outputs(user):
         modes.sort(key=lambda m: (-m['pixels'], -float(m['mode'].split('@')[1])))
         outputs.append({'name': o.get('name'), 'enabled': o.get('enabled', True),
                         'current': current, 'preferred': preferred,
+                        'transform': o.get('transform') or 'normal',
                         'modes': [{'mode': m['mode'], 'label': m['label']} for m in modes]})
     return outputs
 
@@ -88,19 +93,39 @@ def set_mode(user, output, mode):
         raise RuntimeError(r.stderr.strip() or 'Could not set the mode')
 
 
-def saved_modes(config_file=CONFIG_FILE):
+def set_transform(user, output, transform):
+    if not OUTPUT_RE.match(output or ''):
+        raise ValueError('Invalid output name')
+    if transform not in TRANSFORMS:
+        raise ValueError('Invalid rotation')
+    r = wlr_randr(user, ['--output', output, '--transform', transform])
+    if r.returncode != 0:
+        raise RuntimeError(r.stderr.strip() or 'Could not rotate the screen')
+
+
+def _saved(key, config_file):
     try:
         with open(config_file) as f:
-            outputs = (json.load(f).get('display') or {}).get('outputs') or {}
-        return {k: v for k, v in outputs.items() if isinstance(k, str) and isinstance(v, str)}
+            values = (json.load(f).get('display') or {}).get(key) or {}
+        return {k: v for k, v in values.items() if isinstance(k, str) and isinstance(v, str)}
     except (OSError, ValueError, AttributeError):
         return {}
+
+
+def saved_modes(config_file=CONFIG_FILE):
+    return _saved('outputs', config_file)
+
+
+def saved_transforms(config_file=CONFIG_FILE):
+    return {k: v for k, v in _saved('transforms', config_file).items() if v in TRANSFORMS}
 
 
 def apply_saved(user):
     """Apply the saved mode for every connected output that has one."""
     try:
-        connected = {o['name']: o['current'] for o in list_outputs(user)}
+        found = list_outputs(user)
+        connected = {o['name']: o['current'] for o in found}
+        rotation = {o['name']: o['transform'] for o in found}
     except Exception as e:  # no session yet, wlr-randr missing...
         print(f"[display] not applied: {e}", file=sys.stderr)
         return
@@ -112,6 +137,13 @@ def apply_saved(user):
                 print(f"[display] {output} -> {mode}")
             except Exception as e:
                 print(f"[display] {output} {mode} failed: {e}", file=sys.stderr)
+    for output, transform in saved_transforms().items():
+        if output in rotation and rotation[output] != transform:
+            try:
+                set_transform(user, output, transform)
+                print(f"[display] {output} rotated {transform}")
+            except Exception as e:
+                print(f"[display] {output} rotate {transform} failed: {e}", file=sys.stderr)
 
 
 if __name__ == '__main__':
